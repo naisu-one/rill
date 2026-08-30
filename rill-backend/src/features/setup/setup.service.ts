@@ -11,6 +11,7 @@ import {
 } from '@mysten/deepbook-v3';
 import { Transaction } from '@mysten/sui/transactions';
 import { config, suiClient } from '../../core/config';
+import { ValidationError } from '../../core/errors';
 import { suiToMist } from '../../core/node-config';
 import { serializeUnsignedPtb } from '../compiler/ptb.util';
 import type { PublishedSkill } from '../mcp/skills.store';
@@ -77,15 +78,51 @@ export function createdId(
   return objectId;
 }
 
-export async function prepareSetupPlan(
-  skill: PublishedSkill,
-  sender: string,
-  budgetMist: bigint,
-  perTxMist: bigint,
-  minimumRemainingMist: bigint,
-  expiresAtMs: bigint,
-  clientOrderId?: string,
-): Promise<PrepareSetupPlanResult> {
+/**
+ * Who signs the onboarding, and who gets the keys.
+ *
+ * These are two different parties, and conflating them is what makes the whole bounded-agent story
+ * hollow: `agent_wallet` reserves `revoke`, `add_rule`, `remove_rule`, and `rotate_agent` for the
+ * OWNER precisely so that the agent cannot widen its own limits (R4). If one key holds both roles,
+ * every one of those guards protects nothing — the agent simply calls them itself.
+ *
+ * So `owner` signs the setup transactions and becomes the wallet's on-chain owner, while `agent`
+ * only ever RECEIVES the `AgentCap` and `TradeCap` and is the address allowed to spend
+ * (`request_spend` asserts `ctx.sender() == wallet.agent`, abort 7).
+ *
+ * `agent` is optional and defaults to `owner` — that is the self-onboarding path the local signer
+ * still uses, where one local key legitimately plays both roles for a single-operator demo. It is a
+ * deliberate convenience, not the intended production shape: pass a distinct `agent` (the local
+ * signer's address, from its `signer_status` tool) to get the separation the contract is built for.
+ */
+export interface PrepareSetupPlanInput {
+  skill: PublishedSkill;
+  /** Signs both setup PTBs; becomes `wallet.owner` and holds the kill switch. */
+  owner: string;
+  /** Receives the AgentCap + TradeCap and spends within the budget. Defaults to `owner`. */
+  agent?: string;
+  budgetMist: bigint;
+  perTxMist: bigint;
+  minimumRemainingMist: bigint;
+  expiresAtMs: bigint;
+  clientOrderId?: string;
+  /** Explicit onboarding-order price in human DeepBook units. Required when the pool's book is
+   *  empty, since no mid price exists to derive one from. */
+  price?: number;
+}
+
+export async function prepareSetupPlan(input: PrepareSetupPlanInput): Promise<PrepareSetupPlanResult> {
+  const {
+    skill,
+    owner,
+    budgetMist,
+    perTxMist,
+    minimumRemainingMist,
+    expiresAtMs,
+    clientOrderId,
+    price: clientPrice,
+  } = input;
+  const agent = input.agent ?? owner;
   const network = config.network;
   const packageIds = network === 'mainnet' ? mainnetPackageIds : testnetPackageIds;
   const pools = network === 'mainnet' ? mainnetPools : testnetPools;
@@ -99,14 +136,37 @@ export async function prepareSetupPlan(
   const pool = pools[poolKey];
   if (!pool) throw new Error(`DeepBook pool ${poolKey} is unavailable on ${network}.`);
 
-  const deepbook = new DeepBookClient({ client: suiClient as never, address: sender, network });
-  const [book, midPrice] = await Promise.all([
-    deepbook.poolBookParams(poolKey),
-    deepbook.midPrice(poolKey),
-  ]);
+  const deepbook = new DeepBookClient({ client: suiClient as never, address: agent, network });
+  const book = await deepbook.poolBookParams(poolKey);
 
+  /**
+   * The onboarding order is a deliberately-far ask that should never fill — it exists so the
+   * run-set carries a real, placeable order, not so it trades. Its price is normally twice the
+   * live mid.
+   *
+   * `midPrice` aborts (`book::mid_price`, abort 2) when the pool has NO resting orders, which is
+   * the ordinary state of most DeepBook testnet pools — on 2026-08-29 six of the seven were empty,
+   * `SUI_DBUSDC` (this function's own default) among them. That used to surface as an opaque 500
+   * from a dependency, with nothing in the response explaining why onboarding was impossible.
+   *
+   * So: an explicit `price` wins when given, an empty book is reported as an actionable 422 rather
+   * than a crash, and no fallback price is invented. Inventing one would be the dangerous option —
+   * an ask cannot fill against an empty book *today*, but it rests, and a bid arriving later at a
+   * carelessly-low guess would fill an order the user never intended to place.
+   */
   const quantity = Math.max(book.minSize, book.lotSize);
-  const price = Math.ceil((midPrice * 2) / book.tickSize) * book.tickSize;
+  const midPrice = clientPrice === undefined
+    ? await deepbook.midPrice(poolKey).catch(() => undefined)
+    : undefined;
+  if (clientPrice === undefined && midPrice === undefined) {
+    throw new ValidationError(
+      `DeepBook pool ${poolKey} has no resting orders on ${network}, so no market price can be `
+      + 'derived for the onboarding order. Pass an explicit `price` (in human DeepBook units, well '
+      + 'above the market so the order cannot fill), or choose a pool with a live order book.',
+    );
+  }
+  const targetPrice = clientPrice ?? (midPrice as number) * 2;
+  const price = Math.ceil(targetPrice / book.tickSize) * book.tickSize;
   const depositSui = quantity * 1.1;
   const baseCoin = coins[pool.baseCoin];
   const quoteCoin = coins[pool.quoteCoin];
@@ -136,14 +196,14 @@ export async function prepareSetupPlan(
   const setupTx = buildSetupTransaction({
     walletPackageId,
     deepbookPackageId,
-    agent: sender,
+    agent,
     budgetMist,
     perTxMist,
     expiresAtMs,
   });
   // ponytail: trade-cap PTB is templated with a placeholder BalanceManager ID; the local signer
   // fills it with the actual ID created by the setup PTB before signing.
-  const tradeCapTx = buildMintTradeCapTransaction(deepbookPackageId, PLACEHOLDER_BALANCE_MANAGER_ID, sender);
+  const tradeCapTx = buildMintTradeCapTransaction(deepbookPackageId, PLACEHOLDER_BALANCE_MANAGER_ID, agent);
 
   const [setupPtb, tradeCapPtb] = await Promise.all([
     serializeUnsignedPtb(setupTx),
@@ -167,7 +227,9 @@ export async function prepareSetupPlan(
     label,
     actionId: skill.id,
     network,
-    sender,
+    // The address that will submit every spend. `request_spend` asserts `ctx.sender() == wallet.agent`
+    // (abort 7 NOT_AGENT), so this is the AGENT — putting the owner here would abort every spend.
+    sender: agent,
     walletPackageId,
     walletId: '',
     agentCapId: '',

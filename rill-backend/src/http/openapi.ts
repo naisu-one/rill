@@ -359,6 +359,9 @@ const exampleSwapStakeFlow = {
 
 export function buildOpenApiDocument(publicBaseUrl: string) {
   const apiBase = `${publicBaseUrl}/api`;
+  /** The OAuth endpoints and the owner-scoped `/mcp` live at the origin root, so the paths that
+   *  document them override the document-level `/api` server. */
+  const originBase = publicBaseUrl;
 
   return {
     openapi: '3.0.3',
@@ -369,6 +372,27 @@ export function buildOpenApiDocument(publicBaseUrl: string) {
         'Keyless Move flow compiler for Sui — builds unsigned PTBs, simulates, and serves MCP tools. Thiny signs; agent_wallet enforces on-chain caps.',
     },
     servers: [{ url: apiBase, description: 'Current deployment' }],
+    components: {
+      securitySchemes: {
+        oauth2: {
+          type: 'oauth2',
+          description:
+            'OAuth 2.1 public client: authorization code + PKCE (S256), with dynamic client '
+            + 'registration so an agent can register itself. The token subject is a Sui address.',
+          flows: {
+            authorizationCode: {
+              authorizationUrl: `${publicBaseUrl}/oauth/authorize`,
+              tokenUrl: `${publicBaseUrl}/oauth/token`,
+              refreshUrl: `${publicBaseUrl}/oauth/token`,
+              scopes: {
+                mcp: 'Build and simulate the signed-in address\'s published Rill actions',
+                offline_access: 'Refresh the session without signing in again',
+              },
+            },
+          },
+        },
+      },
+    },
     tags: [
       { name: 'Introspect', description: 'Move package discovery' },
       { name: 'Compiler', description: 'Flow → PTB compilation and simulation' },
@@ -376,6 +400,7 @@ export function buildOpenApiDocument(publicBaseUrl: string) {
       { name: 'Skills', description: 'MCP skill publish and execution' },
       { name: 'Walrus', description: 'Decentralized audit trail storage' },
       { name: 'MCP', description: 'Model Context Protocol JSON-RPC' },
+      { name: 'OAuth', description: 'OAuth 2.1 authorization server (origin root, not /api)' },
     ],
     paths: {
       '/introspect': {
@@ -809,6 +834,89 @@ export function buildOpenApiDocument(publicBaseUrl: string) {
               content: { 'application/json': { schema: { type: 'object' } } },
             },
           },
+        },
+      },
+
+      // ── Origin-root endpoints ──
+      // Every path below is served at the ORIGIN, not under `/api`, so each carries its own
+      // `servers` override. That is not a quirk: RFC 8414/9728 define the `/.well-known/*`
+      // discovery paths as origin-relative and MCP clients probe them there, and `/mcp` sits
+      // beside them because it is the URL a user pastes by hand.
+      '/mcp': {
+        servers: [{ url: originBase, description: 'Origin root' }],
+        post: {
+          tags: ['MCP'],
+          summary: 'Owner-scoped MCP endpoint — the single URL a user connects',
+          description:
+            'Serves every action published by the Sui address that owns the access token. '
+            + 'Requires an OAuth 2.1 bearer token; a 401 carries WWW-Authenticate pointing at the '
+            + 'protected-resource metadata so a client can discover the authorization server.',
+          security: [{ oauth2: ['mcp'] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { type: 'object', description: 'JSON-RPC 2.0 request (tools/list, tools/call, …)' },
+              },
+            },
+          },
+          responses: {
+            '200': { description: 'JSON-RPC response', content: { 'application/json': { schema: { type: 'object' } } } },
+            '401': {
+              description: 'Missing or invalid access token; carries the WWW-Authenticate discovery header.',
+              content: { 'application/json': { schema: { type: 'object' } } },
+            },
+          },
+        },
+      },
+      '/.well-known/oauth-protected-resource': {
+        servers: [{ url: originBase, description: 'Origin root' }],
+        get: {
+          tags: ['OAuth'],
+          summary: 'Protected-resource metadata (RFC 9728)',
+          responses: { '200': { description: 'Resource metadata', content: { 'application/json': { schema: { type: 'object' } } } } },
+        },
+      },
+      '/.well-known/oauth-authorization-server': {
+        servers: [{ url: originBase, description: 'Origin root' }],
+        get: {
+          tags: ['OAuth'],
+          summary: 'Authorization-server metadata (RFC 8414)',
+          responses: { '200': { description: 'AS metadata', content: { 'application/json': { schema: { type: 'object' } } } } },
+        },
+      },
+      '/oauth/register': {
+        servers: [{ url: originBase, description: 'Origin root' }],
+        post: {
+          tags: ['OAuth'],
+          summary: 'Dynamic client registration (RFC 7591)',
+          description:
+            'Public clients only — no client secret is ever issued. This is what lets an agent '
+            + 'register itself on connect, so the user pastes a URL and nothing else.',
+          responses: { '201': { description: 'Registered client', content: { 'application/json': { schema: { type: 'object' } } } } },
+        },
+      },
+      '/oauth/authorize': {
+        servers: [{ url: originBase, description: 'Origin root' }],
+        get: {
+          tags: ['OAuth'],
+          summary: 'Authorization endpoint — redirects to Rill Studio for a wallet signature',
+          description:
+            'Authorization code + PKCE (S256 only). Identity is a Sui address proved by a wallet '
+            + 'signature; Rill issues no passwords and stores no user records.',
+          responses: {
+            '302': { description: 'Redirect to the Studio consent page, or back to the client with an error.' },
+            '400': { description: 'Non-redirectable failure (unknown client, unregistered redirect_uri) rendered as a page.' },
+          },
+        },
+      },
+      '/oauth/token': {
+        servers: [{ url: originBase, description: 'Origin root' }],
+        post: {
+          tags: ['OAuth'],
+          summary: 'Token endpoint — authorization_code and refresh_token grants',
+          description: 'Refresh tokens rotate: redeeming one revokes it, so a replay is rejected.',
+          responses: { '200': { description: 'Token response', content: { 'application/json': { schema: { type: 'object' } } } } },
         },
       },
     },

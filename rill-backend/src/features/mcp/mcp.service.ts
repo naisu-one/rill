@@ -8,6 +8,7 @@ import type { CapabilityManifest } from '../../../../packages/rill-sdk/src/capab
 import {
   actionKindOf,
   buildActionInputSchema,
+  buildCatalogToolDef,
   HERO_ACTION_DESCRIPTION,
 } from './tool-schema';
 
@@ -48,13 +49,39 @@ const AGENT_WALLET_FIELDS = ['packageId', 'walletId', 'capId', 'coinType', 'capa
 
 export interface McpDependencies {
   getSkill(id: string): PublishedSkill | undefined;
+  /** Every skill published by one Sui address — the owner-scoped endpoint's catalogue. Optional so
+   *  the many existing call sites and tests that only ever exercise the per-skill endpoint keep
+   *  compiling with the two dependencies they already pass. */
+  listSkillsByOwner?(address: string): PublishedSkill[];
   runFlow: typeof skillRunnerService.runFlow;
 }
 
 const defaultDependencies: McpDependencies = {
   getSkill: (id) => skillsStore.get(id),
+  listSkillsByOwner: (address) => skillsStore.listByOwner(address),
   runFlow: skillRunnerService.runFlow.bind(skillRunnerService),
 };
+
+/**
+ * Which skills one MCP connection may see. Rill serves the same JSON-RPC handler at two endpoints
+ * with two different answers to that question:
+ *
+ * - `skill` — the legacy public `/api/mcp/:skillId`. One skill, no authentication. Kept working
+ *   verbatim because every already-published link and every Claude Code / OpenCode setup out there
+ *   points at it, and because a keyless builder that cannot sign is safe to leave open.
+ * - `owner` — the new authenticated `/mcp`. Every skill published by the address that owns the
+ *   access token, from ONE URL the user pastes once. This is the endpoint OAuth protects.
+ *
+ * A plain string is still accepted anywhere a scope is, and means `skill` — so existing callers and
+ * tests read unchanged.
+ */
+export type McpScope =
+  | { kind: 'skill'; skillId: string }
+  | { kind: 'owner'; address: string };
+
+function resolveScope(scope: string | McpScope): McpScope {
+  return typeof scope === 'string' ? { kind: 'skill', skillId: scope } : scope;
+}
 
 function invalidParams(id: unknown, message: string) {
   return { jsonrpc: '2.0', id, error: { code: -32602, message } };
@@ -321,7 +348,7 @@ export function assertKeylessToolArguments(args: Record<string, unknown>): void 
  * (remote MCP). Returns `null` for notifications (the caller replies HTTP 202 with no body, per spec).
  */
 export async function handleMcpJsonRpc(
-  skillId: string,
+  rawScope: string | McpScope,
   body: Record<string, unknown>,
   dependencies: McpDependencies = defaultDependencies,
 ): Promise<Record<string, unknown> | null> {
@@ -354,10 +381,25 @@ export async function handleMcpJsonRpc(
   }
   const id = body.id ?? null;
 
-  const skill = dependencies.getSkill(skillId);
-  if (!skill) {
+  const scope = resolveScope(rawScope);
+  const skills = scope.kind === 'skill'
+    ? [dependencies.getSkill(scope.skillId)].filter((s): s is PublishedSkill => Boolean(s))
+    : (dependencies.listSkillsByOwner ?? defaultDependencies.listSkillsByOwner!)(scope.address);
+
+  // Legacy per-skill endpoint keeps its original contract: an unknown skill id fails every method,
+  // including `initialize`. Owner scope deliberately does NOT fail on an empty catalogue — a user
+  // who has connected the endpoint but not published anything yet must still be able to complete
+  // the MCP handshake and see an empty `list_actions`, or their agent reports the connector itself
+  // as broken when nothing is actually wrong.
+  if (scope.kind === 'skill' && skills.length === 0) {
     return invalidParams(id, 'Skill not found');
   }
+
+  /** Resolve an `actionId` argument against what THIS connection is allowed to see. Returns
+   *  undefined for an id that exists but belongs to someone else — indistinguishable, on purpose,
+   *  from one that does not exist, so the endpoint cannot be used to enumerate other users' ids. */
+  const skillInScope = (actionId: unknown): PublishedSkill | undefined =>
+    typeof actionId === 'string' ? skills.find((s) => s.id === actionId) : undefined;
 
   if (method === 'initialize') {
     const requested = (body.params as { protocolVersion?: string } | undefined)?.protocolVersion;
@@ -384,11 +426,16 @@ export async function handleMcpJsonRpc(
   }
 
   if (method === 'tools/list') {
+    // Exactly one skill in scope — whichever endpoint served it — advertises that skill's precise
+    // `params` schema, so an agent can fill the call correctly without a round trip. A catalogue of
+    // several actions cannot express one schema honestly, so it advertises the open-params
+    // catalogue tool and points the agent at `describe_action` (see `buildCatalogToolDef`).
+    const buildActionTool = skills.length === 1 ? skills[0].toolDefs : buildCatalogToolDef();
     return {
       jsonrpc: '2.0',
       id,
       result: {
-        tools: [actionTools[0], actionTools[1], skill.toolDefs],
+        tools: [actionTools[0], actionTools[1], buildActionTool],
       },
     };
   }
@@ -422,42 +469,49 @@ export async function handleMcpJsonRpc(
         } catch (error) {
           return toolError(id, 'invalid_arguments', error instanceof Error ? error.message : String(error));
         }
-        return toolResult(id, [{
-          actionId: skill.id,
-          name: skill.name,
-          description: skill.description,
+        return toolResult(id, skills.map((s) => ({
+          actionId: s.id,
+          name: s.name,
+          description: s.description,
           walletBound: true,
           network: config.network,
-        }]);
+        })));
       case 'describe_action':
         try {
           assertOnlyFields(args, ['actionId'], 'describe_action');
         } catch (error) {
           return toolError(id, 'invalid_arguments', error instanceof Error ? error.message : String(error));
         }
-        if (args.actionId !== skill.id) {
+        const described = skillInScope(args.actionId);
+        if (!described) {
           return toolError(id, 'action_unavailable', 'Action is not available from this endpoint.');
         }
         const walletPackageId = config.agentWallet?.packageId ?? '<agentWallet.packageId>';
         return toolResult(id, {
-          actionId: skill.id,
-          name: skill.name,
-          description: skill.description,
+          actionId: described.id,
+          name: described.name,
+          description: described.description,
           network: config.network,
-          runtimeParameters: skill.toolDefs.inputSchema.properties.params,
-          agentWallet: skill.toolDefs.inputSchema.properties.agentWallet,
+          runtimeParameters: described.toolDefs.inputSchema.properties.params,
+          agentWallet: described.toolDefs.inputSchema.properties.agentWallet,
           requiresSetup: true,
           setupSchema: describeActionSetupSchema(),
           walletPackageId,
-          ...describeActionMetadata(skill, walletPackageId),
+          ...describeActionMetadata(described, walletPackageId),
           simulationRule: 'Rill Cloud and rill-wallet both require a verified successful simulation.',
           signingRule: 'Only local rill-wallet.execute_rill_action may validate, re-simulate, sign, and submit.',
         });
       case 'build_action':
         try {
-          const build = readBuildActionArgs(args, skill.id);
-          const data = await dependencies.runFlow(skill.flow, build.params, {
-            actionId: skill.id,
+          // Resolve WHICH action first: on the owner endpoint the caller picks from a catalogue, so
+          // the id can't be assumed to be the one skill this endpoint serves.
+          const target = skillInScope((args as { actionId?: unknown }).actionId);
+          if (!target) {
+            return toolError(id, 'action_unavailable', 'Action is not available from this endpoint.');
+          }
+          const build = readBuildActionArgs(args, target.id);
+          const data = await dependencies.runFlow(target.flow, build.params, {
+            actionId: target.id,
             sender: build.sender,
             agentWallet: build.agentWallet,
           });

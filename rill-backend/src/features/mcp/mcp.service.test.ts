@@ -912,3 +912,187 @@ test('publish still succeeds when the store is below capacity', async () => {
     skillsStore.save = save;
   }
 });
+
+// ── owner-scoped endpoint (the single URL a user pastes into their agent) ──
+
+const OWNER = `0x${'a'.repeat(64)}`;
+const OTHER_OWNER = `0x${'b'.repeat(64)}`;
+
+const ownedSwap = {
+  id: 'skill_owned_swap',
+  name: 'Cetus swap',
+  description: 'Build one wallet-bound Cetus swap for strict local execution.',
+  flow: { nodes: [{ id: 'swap', type: 'cetus_swap' }], edges: [] },
+  toolDefs: buildToolDefs({ nodes: [{ id: 'swap', type: 'cetus_swap' }], edges: [] }, 'skill_owned_swap'),
+  createdAt: '2026-07-17T00:00:00.000Z',
+  owner: OWNER,
+} satisfies PublishedSkill;
+
+const ownedDeepbook = { ...skill, id: 'skill_owned_deepbook', owner: OWNER } satisfies PublishedSkill;
+
+/** Deps for an owner endpoint whose catalogue is exactly `catalogue`. `getSkill` deliberately sees
+ *  EVERY skill (as the real store does), so these tests prove the owner scope — not a rigged
+ *  lookup — is what keeps another user's skill out. */
+function ownerDeps(
+  catalogue: PublishedSkill[],
+  runFlow: (...args: unknown[]) => Promise<never> = async () => ({ version: '1' }) as never,
+) {
+  const all = [skill, ownedSwap, ownedDeepbook, { ...skill, id: 'skill_theirs', owner: OTHER_OWNER }];
+  return {
+    getSkill: (id: string) => all.find((s) => s.id === id),
+    listSkillsByOwner: () => catalogue,
+    runFlow,
+  };
+}
+
+test('owner scope lists every skill that address published, in one endpoint', async () => {
+  const response = await handleMcpJsonRpc(
+    { kind: 'owner', address: OWNER },
+    { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_actions', arguments: {} } },
+    ownerDeps([ownedSwap, ownedDeepbook]),
+  );
+  const result = response?.result as { structuredContent: { actionId: string; name: string }[] };
+  expect(result.structuredContent.map((a) => a.actionId)).toEqual(['skill_owned_swap', 'skill_owned_deepbook']);
+});
+
+// A user who has connected the connector but published nothing must still complete the handshake,
+// or their agent reports the connector itself as broken when nothing is wrong.
+test('owner scope with an empty catalogue still initializes and lists no actions', async () => {
+  const init = await handleMcpJsonRpc(
+    { kind: 'owner', address: OWNER },
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } },
+    ownerDeps([]),
+  );
+  expect((init?.result as { serverInfo: { name: string } }).serverInfo.name).toBe('rill-actions');
+
+  const list = await handleMcpJsonRpc(
+    { kind: 'owner', address: OWNER },
+    { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_actions', arguments: {} } },
+    ownerDeps([]),
+  );
+  expect((list?.result as { structuredContent: unknown[] }).structuredContent).toEqual([]);
+});
+
+test('one skill in scope advertises that skill\'s exact params; a catalogue advertises the open shape', async () => {
+  const single = await handleMcpJsonRpc(
+    { kind: 'owner', address: OWNER },
+    { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+    ownerDeps([ownedSwap]),
+  );
+  const singleTools = (single?.result as { tools: { name: string; inputSchema: { properties: { params: { properties?: object; additionalProperties?: boolean } } } }[] }).tools;
+  expect(Object.keys(singleTools[2].inputSchema.properties.params.properties ?? {}))
+    .toEqual(['amount_in', 'min_amount_out', 'pool']);
+
+  const many = await handleMcpJsonRpc(
+    { kind: 'owner', address: OWNER },
+    { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+    ownerDeps([ownedSwap, ownedDeepbook]),
+  );
+  const manyTools = (many?.result as { tools: { name: string; inputSchema: { properties: { params: { additionalProperties?: boolean } } } }[] }).tools;
+  expect(manyTools[2].name).toBe('build_action');
+  // Open params, because no single JSON Schema can honestly describe two different actions.
+  expect(manyTools[2].inputSchema.properties.params.additionalProperties).toBe(true);
+});
+
+test('describe_action resolves any action in the caller\'s own catalogue', async () => {
+  const response = await handleMcpJsonRpc(
+    { kind: 'owner', address: OWNER },
+    { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'describe_action', arguments: { actionId: 'skill_owned_swap' } } },
+    ownerDeps([ownedSwap, ownedDeepbook]),
+  );
+  const result = response?.result as { structuredContent: { actionId: string }; isError: boolean };
+  expect(result.isError).toBe(false);
+  expect(result.structuredContent.actionId).toBe('skill_owned_swap');
+});
+
+// The authorization boundary. `getSkill` can see this id, but it is not in the caller's scope, so
+// the answer must be identical to one for an id that does not exist at all — otherwise the endpoint
+// becomes an oracle for enumerating other users' skill ids.
+test('an action owned by someone else is refused, indistinguishably from a nonexistent one', async () => {
+  const deps = ownerDeps([ownedSwap]);
+  const theirs = await handleMcpJsonRpc(
+    { kind: 'owner', address: OWNER },
+    { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'describe_action', arguments: { actionId: 'skill_theirs' } } },
+    deps,
+  );
+  const missing = await handleMcpJsonRpc(
+    { kind: 'owner', address: OWNER },
+    { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'describe_action', arguments: { actionId: 'skill_no_such_thing' } } },
+    deps,
+  );
+  expect((theirs?.result as { content: [{ text: string }] }).content[0].text)
+    .toBe((missing?.result as { content: [{ text: string }] }).content[0].text);
+  expect(JSON.parse((theirs?.result as { content: [{ text: string }] }).content[0].text).code)
+    .toBe('action_unavailable');
+});
+
+test('build_action refuses to compile an action outside the caller\'s catalogue', async () => {
+  let called = false;
+  const response = await handleMcpJsonRpc(
+    { kind: 'owner', address: OWNER },
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'build_action',
+        arguments: {
+          actionId: 'skill_theirs',
+          sender: `0x${'c'.repeat(64)}`,
+          agentWallet: { walletId: '0x1', capId: '0x2' },
+          params: {},
+        },
+      },
+    },
+    ownerDeps([ownedSwap], async () => { called = true; return { version: '1' } as never; }),
+  );
+  const result = response?.result as { content: [{ text: string }]; isError: boolean };
+  expect(result.isError).toBe(true);
+  expect(JSON.parse(result.content[0].text).code).toBe('action_unavailable');
+  expect(called).toBe(false);
+});
+
+test('build_action compiles the action the caller names, not merely the first in the catalogue', async () => {
+  let compiledFlow: unknown;
+  await handleMcpJsonRpc(
+    { kind: 'owner', address: OWNER },
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'build_action',
+        arguments: {
+          actionId: 'skill_owned_deepbook',
+          sender: `0x${'c'.repeat(64)}`,
+          agentWallet: {
+            packageId: '0x2', walletId: '0x3', capId: '0x6', versionId: '0x9',
+            capabilityManifest: budgetManifest,
+          },
+          params: {},
+        },
+      },
+    },
+    ownerDeps([ownedSwap, ownedDeepbook], async (flow) => { compiledFlow = flow; return { version: '1' } as never; }),
+  );
+  expect(compiledFlow).toEqual(ownedDeepbook.flow);
+});
+
+// The legacy public endpoint must behave exactly as before — every already-shared link depends on it.
+test('a plain skill id still means the per-skill endpoint, unchanged', async () => {
+  const response = await handleMcpJsonRpc(
+    'skill_deepbook',
+    { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_actions', arguments: {} } },
+    { getSkill: () => skill, runFlow: async () => ({ version: '1' }) as never },
+  );
+  const result = response?.result as { structuredContent: { actionId: string }[] };
+  expect(result.structuredContent).toHaveLength(1);
+  expect(result.structuredContent[0].actionId).toBe('skill_deepbook');
+
+  const unknown = await handleMcpJsonRpc(
+    'skill_missing',
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+    { getSkill: () => undefined, runFlow: async () => ({ version: '1' }) as never },
+  );
+  expect((unknown?.error as { message: string }).message).toBe('Skill not found');
+});

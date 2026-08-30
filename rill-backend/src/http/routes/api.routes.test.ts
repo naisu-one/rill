@@ -63,7 +63,56 @@ test('POST /setup/prepare validates input and returns a setup plan', async () =>
     runSetTemplate: { version: '1' },
     walletPackageId: '0x1',
     deepbookPackageId: '0x2',
+    // Omitting `agent` keeps the local signer's self-onboarding path working: one key plays both
+    // roles. The response says so outright rather than leaving the caller to infer it.
+    owner: '0x'.padEnd(66, '0'),
+    agent: '0x'.padEnd(66, '0'),
+    ownerIsAgent: true,
   });
+});
+
+// The separation the contract is built for: `revoke`/`add_rule`/`rotate_agent` are owner-only, so
+// they only protect anything when the agent is a DIFFERENT key. The response has to report which
+// of the two shapes a caller actually got.
+test('POST /setup/prepare reports owner and agent separately when they differ', async () => {
+  const originalSave = skillsStore.save.bind(skillsStore);
+  skillsStore.save = (s) => { (skillsStore as unknown as { skills: Map<string, PublishedSkill> }).skills.set(s.id, s); };
+  originalSave(skill);
+  skillsStore.save = originalSave;
+
+  const owner = `0x${'a'.repeat(64)}`;
+  const agent = `0x${'b'.repeat(64)}`;
+  const response = await apiRouter.request('/setup/prepare', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      skillId: skill.id,
+      sender: owner,
+      agent,
+      budgetMist: '1000000000',
+      perTxMist: '100000000',
+    }),
+  });
+
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as { success: boolean; data: Record<string, unknown> };
+  expect(body.data).toMatchObject({ owner, agent, ownerIsAgent: false });
+});
+
+test('POST /setup/prepare rejects a malformed agent address', async () => {
+  const response = await apiRouter.request('/setup/prepare', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      skillId: skill.id,
+      sender: '0x'.padEnd(66, '0'),
+      agent: 'not-an-address',
+      budgetMist: '1000000000',
+      perTxMist: '100000000',
+    }),
+  });
+
+  expect(response.status).toBe(400);
 });
 
 test('POST /setup/prepare rejects missing required fields', async () => {

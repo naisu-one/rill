@@ -21,7 +21,13 @@ import { skillRunnerService } from '../../features/mcp/skill-runner.service';
 import { buildToolDefs, heroActionOf } from '../../features/mcp/tool-schema';
 import { buildSkillDoc } from '../../features/mcp/skill-doc';
 import { renderAgentInstructions } from '../../features/mcp/agent-instructions';
-import { handleMcpJsonRpc } from '../../features/mcp/mcp.service';
+import { dispatchMcpPayload, MCP_PARSE_ERROR_BODY } from '../mcp-transport';
+import {
+  authenticateAccessToken,
+  OAuthError,
+  wwwAuthenticateHeader,
+} from '../../features/auth/oauth.service';
+import { bearerFromHeader } from '../../features/auth/tokens';
 import { prepareSetupPlan } from '../../features/setup/setup.service';
 import { walrusAuditService } from '../../features/walrus/audit.service';
 import {
@@ -228,6 +234,29 @@ apiRouter.post('/simulate', zValidator('json', SimulateSchema), async (c) => {
 apiRouter.post('/publish', zValidator('json', PublishSchema, zodErrorToMessage), async (c) => {
   const { flow, policyId } = c.req.valid('json');
 
+  /**
+   * Ownership is opt-in by presenting a token, not required. Publishing anonymously still works and
+   * still returns a per-skill MCP URL — that is the flow Studio has always had, and breaking it
+   * would strand anyone mid-demo. A skill published WITH a token additionally becomes visible on
+   * that address's single `/mcp` endpoint.
+   *
+   * A malformed or expired token is rejected rather than ignored: silently falling back to
+   * "anonymous" would publish a skill the user believes is theirs into a catalogue it will never
+   * appear in, and they would have no way to tell from the response.
+   */
+  let owner: string | undefined;
+  const bearer = bearerFromHeader(c.req.header('Authorization'));
+  if (bearer) {
+    try {
+      owner = authenticateAccessToken(bearer).address;
+    } catch (err) {
+      const description = err instanceof OAuthError ? err.description : 'Invalid access token.';
+      return c.json({ success: false, error: description, type: 'unauthorized' }, 401, {
+        'WWW-Authenticate': wwwAuthenticateHeader(description),
+      });
+    }
+  }
+
   if (flow.nodes.length > MAX_FLOW_NODES) {
     return c.json(flowSizeCapError(flow.nodes.length), 422);
   }
@@ -253,6 +282,7 @@ apiRouter.post('/publish', zValidator('json', PublishSchema, zodErrorToMessage),
     toolDefs,
     policyId,
     createdAt: new Date().toISOString(),
+    owner,
   });
 
   return c.json({
@@ -265,6 +295,10 @@ apiRouter.post('/publish', zValidator('json', PublishSchema, zodErrorToMessage),
       skillUrl,
       toolDefs,
       warnings,
+      owner,
+      /** Present only for an owned skill: the single connector URL that serves every action this
+       *  address has published. Prefer handing the user THIS over the per-skill `mcpUrl`. */
+      ownerMcpUrl: owner ? config.oauth.resource : undefined,
     },
   });
 });
@@ -286,8 +320,32 @@ apiRouter.get('/skills/:id/instructions.md', (c) => {
   return c.text(renderAgentInstructions(skill), 200, { 'content-type': 'text/markdown; charset=utf-8' });
 });
 
+/**
+ * List skills. What you see depends on who you are:
+ *
+ * - With a valid access token → exactly the skills that address published.
+ * - Without one → only skills that have no owner, i.e. those published anonymously (including
+ *   every skill that predates the authorization server).
+ *
+ * An owned skill is never listed anonymously. Before ownership existed this endpoint returned
+ * everything, which was survivable when nothing was attributable — but a skill id is enough to
+ * build against that skill's wallet binding on the public per-skill endpoint, so once ids belong to
+ * people, enumerating them all is a real leak rather than a cosmetic one.
+ */
 apiRouter.get('/skills', (c) => {
-  const skills = skillsStore.list().map((s) => ({
+  const bearer = bearerFromHeader(c.req.header('Authorization'));
+  let visible = skillsStore.list().filter((s) => !s.owner);
+  if (bearer) {
+    try {
+      visible = skillsStore.listByOwner(authenticateAccessToken(bearer).address);
+    } catch (err) {
+      const description = err instanceof OAuthError ? err.description : 'Invalid access token.';
+      return c.json({ success: false, error: description, type: 'unauthorized' }, 401, {
+        'WWW-Authenticate': wwwAuthenticateHeader(description),
+      });
+    }
+  }
+  const skills = visible.map((s) => ({
     id: s.id,
     name: s.name,
     description: s.description,
@@ -323,16 +381,28 @@ apiRouter.post('/setup/prepare', zValidator('json', SetupPrepareSchema), async (
   const skill = skillsStore.get(body.skillId);
   if (!skill) return c.json({ success: false, error: 'Skill not found' }, 404);
 
-  const plan = await prepareSetupPlan(
+  const plan = await prepareSetupPlan({
     skill,
-    body.sender,
-    BigInt(body.budgetMist),
-    BigInt(body.perTxMist),
-    body.minimumRemainingMist ? BigInt(body.minimumRemainingMist) : 0n,
-    body.expiresAtMs ? BigInt(body.expiresAtMs) : BigInt(Date.now() + 24 * 60 * 60 * 1000),
-    body.clientOrderId,
-  );
-  return c.json({ success: true, data: plan });
+    owner: body.sender,
+    agent: body.agent,
+    budgetMist: BigInt(body.budgetMist),
+    perTxMist: BigInt(body.perTxMist),
+    minimumRemainingMist: body.minimumRemainingMist ? BigInt(body.minimumRemainingMist) : 0n,
+    expiresAtMs: body.expiresAtMs ? BigInt(body.expiresAtMs) : BigInt(Date.now() + 24 * 60 * 60 * 1000),
+    clientOrderId: body.clientOrderId,
+    price: body.price,
+  });
+  return c.json({
+    success: true,
+    data: {
+      ...plan,
+      /** Stated back explicitly so a caller can see, without decoding the PTB, whether this setup
+       *  actually separates the two roles or is a single-key self-onboarding. */
+      owner: body.sender,
+      agent: body.agent ?? body.sender,
+      ownerIsAgent: (body.agent ?? body.sender) === body.sender,
+    },
+  });
 });
 
 apiRouter.get('/audit/:blobId', async (c) => {
@@ -379,27 +449,12 @@ apiRouter.post('/mcp/:skillId', async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }, 400);
+    return c.json(MCP_PARSE_ERROR_BODY, 400);
   }
 
-  // JSON-RPC batch support (R14): a batch is a JSON array of request objects; the server responds
-  // with an array of the corresponding responses, omitting any entry that was a notification (which
-  // gets no response at all, batched or not).
-  if (Array.isArray(body)) {
-    if (body.length === 0) {
-      return c.json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request: batch must not be empty.' } }, 400);
-    }
-    const responses = await Promise.all(
-      body.map((entry) => handleMcpJsonRpc(skillId, entry as Record<string, unknown>)),
-    );
-    const nonNull = responses.filter((response): response is Record<string, unknown> => response !== null);
-    // A batch made entirely of notifications gets no body — same 202 convention as a single one.
-    if (nonNull.length === 0) return c.body(null, 202);
-    return c.json(nonNull);
-  }
-
-  const response = await handleMcpJsonRpc(skillId, body as Record<string, unknown>);
-  // Notifications/responses get no body — reply 202 Accepted per the Streamable HTTP spec.
-  if (response === null) return c.body(null, 202);
-  return c.json(response);
+  // Transport behavior (batches, notifications, 202) is shared with the owner-scoped `/mcp`
+  // endpoint so the two can never drift — see `http/mcp-transport.ts`.
+  const result = await dispatchMcpPayload({ kind: 'skill', skillId }, body);
+  if (result.status === 202) return c.body(null, 202);
+  return c.json(result.body, result.status);
 });

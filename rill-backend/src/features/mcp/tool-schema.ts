@@ -223,3 +223,51 @@ export function buildToolDefs(flow: FlowGraph, actionId: string) {
     inputSchema: buildActionInputSchema(actionId, flow),
   };
 }
+
+/**
+ * The `build_action` tool definition for the OWNER-scoped endpoint (`/mcp`) when that owner has
+ * published more than one skill.
+ *
+ * A per-skill endpoint can publish one exact `params` schema because it serves exactly one action.
+ * One endpoint serving a catalogue cannot: a Cetus swap wants `amount_in`/`min_amount_out`, a
+ * DeepBook order wants `poolKey`/`price`/`quantity`, and JSON Schema has no way to say "whichever
+ * shape matches the actionId you pass" that MCP clients reliably act on. So `params` is left open
+ * here and the agent is pointed at `describe_action`, which returns that action's precise
+ * `runtimeParameters` schema.
+ *
+ * This loosens the ADVERTISED schema, never the enforcement: `node-config.ts`'s
+ * `resolveEffectiveFlow` still rejects any runtime key that isn't allowed for the flow's nodes, so
+ * a wrong or extra param is refused at compile time exactly as it was before.
+ */
+export function buildCatalogActionInputSchema() {
+  return {
+    type: 'object',
+    properties: {
+      actionId: {
+        type: 'string',
+        description: 'Published Rill action ID from list_actions. Call describe_action on it first '
+          + 'to read the exact params this action takes.',
+      },
+      sender: { type: 'string', description: 'Expected local signer Sui address; Rill never signs.' },
+      agentWallet: buildAgentWalletSchema(),
+      params: {
+        type: 'object',
+        additionalProperties: true,
+        description: 'Runtime parameters for THIS action, matching describe_action\'s '
+          + '`runtimeParameters` schema. Unrecognized keys are rejected when the flow is compiled.',
+      },
+    },
+    required: ['actionId', 'sender', 'agentWallet', 'params'],
+    additionalProperties: false,
+  };
+}
+
+/** Catalogue-mode `build_action` tool definition — see `buildCatalogActionInputSchema`. */
+export function buildCatalogToolDef() {
+  return {
+    name: 'build_action' as const,
+    description: 'Build one wallet-bound action published to this endpoint, for strict local '
+      + 'execution. Pass the actionId from list_actions.',
+    inputSchema: buildCatalogActionInputSchema(),
+  };
+}

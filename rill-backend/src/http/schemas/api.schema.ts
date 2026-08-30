@@ -133,10 +133,22 @@ export const CapabilityPreviewSchema = z.object({
 
 export const SetupPrepareSchema = z.object({
   skillId: z.string().min(1),
+  /** Signs the setup PTBs and becomes the wallet's on-chain owner (the kill switch). */
   sender: suiAddress('sender'),
+  /**
+   * The address that receives the AgentCap/TradeCap and will spend. Optional, defaulting to
+   * `sender` for the local signer's self-onboarding path — but passing a DISTINCT address is what
+   * makes `agent_wallet`'s owner-only guards (`revoke`, `add_rule`, `rotate_agent`) mean anything,
+   * because otherwise one key holds both roles and the agent can lift its own limits.
+   */
+  agent: suiAddress('agent').optional(),
   budgetMist: z.string().regex(/^\d+$/, 'budgetMist must be a decimal u64 string.'),
   perTxMist: z.string().regex(/^\d+$/, 'perTxMist must be a decimal u64 string.'),
   minimumRemainingMist: z.string().regex(/^\d+$/, 'minimumRemainingMist must be a decimal u64 string.').optional(),
   expiresAtMs: z.string().regex(/^\d+$/, 'expiresAtMs must be a decimal u64 string.').optional(),
   clientOrderId: z.string().regex(/^\d+$/, 'clientOrderId must be a decimal u64 string.').optional(),
+  /** Explicit onboarding-order price, in human DeepBook units. Required when the pool's order book
+   *  is empty (most DeepBook testnet pools are), because there is then no mid price to derive one
+   *  from — see `prepareSetupPlan`. */
+  price: z.number().positive('price must be greater than zero.').optional(),
 }).strict();

@@ -6,6 +6,8 @@ import { bodyLimit } from 'hono/body-limit';
 import { config } from './core/config';
 import { errorHandler } from './core/errors';
 import { apiRouter } from './http/routes/api.routes';
+import { oauthRouter } from './http/routes/oauth.routes';
+import { mcpRouter } from './http/routes/mcp.routes';
 import { buildOpenApiDocument } from './http/openapi';
 
 const app = new Hono();
@@ -19,7 +21,14 @@ app.use(
   cors({
     origin: '*',
     allowMethods: ['GET', 'POST', 'OPTIONS'],
-    allowHeaders: ['Content-Type'],
+    // `Authorization` is required for the OAuth-protected `/mcp` endpoint, and `MCP-Protocol-Version`
+    // is sent by MCP clients on every call — omitting either makes the browser preflight fail before
+    // the request is ever seen here, which looks like an unreachable server rather than a CORS
+    // rejection. `WWW-Authenticate` must be EXPOSED (not merely allowed): it carries the discovery
+    // pointer a client reads off a 401 to find the authorization server, and an unexposed response
+    // header is invisible to browser JavaScript.
+    allowHeaders: ['Content-Type', 'Authorization', 'MCP-Protocol-Version'],
+    exposeHeaders: ['WWW-Authenticate', 'MCP-Protocol-Version'],
     maxAge: 600,
   }),
 );
@@ -45,6 +54,13 @@ app.get('/health', (c) =>
     docs: config.publicBaseUrl,
     keyless: true,
     agentWalletConfigured: Boolean(config.agentWallet),
+    /** The single URL a user pastes into their agent, plus whether issued tokens survive a restart
+     *  (they do not when `RILL_OAUTH_SECRET` is unset — see `core/config.ts`). */
+    mcp: {
+      endpoint: config.oauth.resource,
+      auth: 'oauth2.1+pkce+dcr',
+      tokensDurable: config.oauth.secretFromEnv,
+    },
     walrus: {
       readEndpoint: '/api/audit/:blobId',
       availability: 'unchecked',
@@ -61,6 +77,13 @@ app.get('/api/docs', swagger);
 app.get('/api/openapi.json', (c) => c.json(buildOpenApiDocument(config.publicBaseUrl)));
 
 app.route('/api', apiRouter);
+
+// Mounted at the ORIGIN ROOT, not under `/api`. RFC 8414/9728 define the `/.well-known/*` discovery
+// paths as origin-relative and every MCP client probes them there, so a prefixed mount would be
+// invisible to all of them. `/mcp` sits at the root for the same reason: it is the single URL a
+// user pastes into their agent, and short URLs get pasted correctly more often than long ones.
+app.route('/', oauthRouter);
+app.route('/', mcpRouter);
 
 // Global Error Handler
 app.onError(errorHandler);
