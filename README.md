@@ -49,26 +49,53 @@ self-describing tools (MCP / REST / Skill), compiles plain intents into correct,
 
 ## Use it with any agent
 
-A published flow gives you an MCP URL. Connect your agent:
+**One URL, for everything you publish:**
 
-Set the local signer key only in the shell or secret manager that launches the agent. Never put it in
-MCP JSON, command arguments, transcripts, or the repository.
-
-```bash
-export RILL_REMOTE_MCP_URL="https://api.rill.naisu.one/api/mcp/<skillId>"
-export RILL_SIGNER_POLICY_PATH="$PWD/.rill/demo/sets/live.json"
-
-claude mcp add --transport http rill-actions "$RILL_REMOTE_MCP_URL"
-claude mcp add --transport stdio \
-  --env "SUI_NETWORK=testnet" \
-  --env "RILL_SIGNER_POLICY_PATH=$RILL_SIGNER_POLICY_PATH" \
-  rill-wallet -- bun run packages/rill-signer/src/mcp.ts
+```
+https://api.rill.naisu.one/mcp
 ```
 
-Launch Claude from the shell where `RILL_SUI_PRIVATE_KEY` is already set. The persisted MCP configuration
-contains only public network and policy-path values.
+Add it as a connector and the agent registers itself and walks you through sign-in — there is no
+client id to create and no config file to edit. Sign-in is a wallet signature, not a password:
+your Sui address *is* your Rill identity, because that is what owns the agent wallet on-chain. The
+signature is a login only — it moves no funds and approves no transaction.
 
-Or open the human-readable instructions: `GET /api/skills/<skillId>/skill.md`.
+The endpoint then serves every action that address has published. Publish another one later and it
+appears in the same connector; you never reconnect.
+
+Under the hood it is a standard OAuth 2.1 public client — authorization code + PKCE (S256), dynamic
+client registration (RFC 7591), rotating refresh tokens, and RFC 8707 resource binding — so any MCP
+client that speaks OAuth works without Rill-specific handling:
+
+| | |
+|---|---|
+| `GET /.well-known/oauth-protected-resource` | resource metadata (RFC 9728) |
+| `GET /.well-known/oauth-authorization-server` | AS metadata (RFC 8414) |
+| `POST /oauth/register` · `GET /oauth/authorize` · `POST /oauth/token` | register, sign in, exchange |
+
+### Signing: the local wallet
+
+Building is keyless and remote; signing is local and yours. Install the standalone signer — one
+binary, no repo clone, no key to export (it generates and persists its own keypair on first use):
+
+```bash
+curl -fsSL https://github.com/naisu-one/rill/releases/latest/download/rill-wallet-darwin-arm64 \
+  -o rill-wallet && chmod +x rill-wallet
+#   Intel Mac: rill-wallet-darwin-x64   ·   Linux: rill-wallet-linux-x64
+
+claude mcp add --transport http rill-actions "https://api.rill.naisu.one/mcp"
+claude mcp add --transport stdio --env "SUI_NETWORK=testnet" rill-wallet -- "$PWD/rill-wallet"
+```
+
+To use your own key instead of the generated one, set `RILL_SUI_PRIVATE_KEY` only in the shell or
+secret manager that launches the agent — never in MCP JSON, command arguments, transcripts, or the
+repository. The persisted MCP configuration holds only public network values.
+
+### Per-skill links
+
+A single published action also still has its own public, unauthenticated URL
+(`/api/mcp/<skillId>`), which is what a shared demo link uses. Human-readable instructions for one:
+`GET /api/skills/<skillId>/skill.md`.
 
 ## Repository layout
 

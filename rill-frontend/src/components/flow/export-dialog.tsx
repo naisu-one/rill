@@ -11,6 +11,8 @@ import { buildFlowGraph } from "@/lib/flow-mapper";
 import { computePublishGate } from "@/lib/publish-gate";
 import { hashFlowGraph } from "@/lib/graph-hash";
 import { rillApi, type PublishResult } from "@/lib/rill-api";
+import { useCurrentAccount, useSignPersonalMessage } from "@mysten/dapp-kit";
+import { ensureSession } from "@/lib/rill-session";
 import { useFlowRequest } from "@/lib/use-flow-request";
 import {
   loadPublishRecordFromStorage,
@@ -67,6 +69,13 @@ export function ExportDialog({
   // avoid a race where the graph changes again while the request is in flight.
   const publishedForHashRef = useRef<string | null>(null);
 
+  const account = useCurrentAccount();
+  const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
+  // The session token captured at click time, so the in-flight request always uses the token that
+  // was proved for THIS publish rather than whatever lands in storage later.
+  const sessionTokenRef = useRef<string | undefined>(undefined);
+  const [signingIn, setSigningIn] = useState(false);
+
   const {
     data: freshResult,
     error: publishError,
@@ -74,7 +83,7 @@ export function ExportDialog({
     run: doPublish,
     reset: resetPublish,
   } = useFlowRequest<PublishResult>((signal) =>
-    rillApi.publish({ nodes: graph.nodes, edges: graph.edges }, signal),
+    rillApi.publish({ nodes: graph.nodes, edges: graph.edges }, signal, sessionTokenRef.current),
   );
 
   // Re-read localStorage every time the dialog opens — this component is now
@@ -108,11 +117,36 @@ export function ExportDialog({
   const staleRecord = storedRecord && storedRecord.hash !== hash ? storedRecord : null;
   const justPublished = published !== null && freshResult !== null && publishedForHashRef.current === hash;
 
-  const handlePublish = () => {
+  const handlePublish = async () => {
     if (!gate.publishable) {
       toast.error(gate.reason ?? "This flow can't be compiled & exported yet.");
       return;
     }
+
+    // Publishing while signed in records the owner, which is what puts this action on the single
+    // connector URL. A connected wallet that declines to sign still publishes — just ownerless,
+    // exactly as Studio behaved before sessions existed — so a refused prompt never blocks the demo.
+    sessionTokenRef.current = undefined;
+    if (account) {
+      setSigningIn(true);
+      try {
+        const session = await ensureSession(account.address, async (message) => {
+          const { signature } = await signPersonalMessage({ message });
+          return signature;
+        });
+        sessionTokenRef.current = session.accessToken;
+      } catch (err) {
+        toast.message("Publishing without signing in", {
+          description:
+            err instanceof Error && /reject|denied|cancel/i.test(err.message)
+              ? "This action won't appear on your single connector URL."
+              : "Wallet sign-in failed; this action won't appear on your single connector URL.",
+        });
+      } finally {
+        setSigningIn(false);
+      }
+    }
+
     publishedForHashRef.current = hash;
     doPublish();
   };
@@ -137,13 +171,20 @@ export function ExportDialog({
     });
   }, [published]);
 
+  /**
+   * The URL to hand the user. An owned skill gets the single owner-scoped connector, which serves
+   * every action this address publishes and needs no reconnection when another is added later; an
+   * ownerless one falls back to its per-skill URL, which is all it can be reached at.
+   */
+  const connectUrl = published ? published.ownerMcpUrl ?? published.mcpUrl : "";
+
   const claudeConfig = useMemo(() => {
     if (!published) return "";
     return JSON.stringify(
       {
         mcpServers: {
           "rill-actions": {
-            url: published.mcpUrl,
+            url: published.ownerMcpUrl ?? published.mcpUrl,
           },
         },
       },
@@ -295,7 +336,7 @@ export function ExportDialog({
                   : "cursor-not-allowed bg-foreground/40 text-background/70"
               }`}
             >
-              Publish
+              {signingIn ? "Waiting for your wallet…" : "Publish"}
             </motion.button>
           </motion.div>
         )}
@@ -320,14 +361,19 @@ export function ExportDialog({
               <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 MCP server URL
               </label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {published.ownerMcpUrl
+                  ? "Your connector. It serves every action you publish — add it once and anything you publish later shows up without reconnecting."
+                  : "This action's own link. Sign in with your wallet before publishing to get one connector URL for everything instead."}
+              </p>
               <div ref={mcpBoxRef} className="mt-1.5 flex gap-2 rounded-xl">
                 <code className="flex-1 rounded-lg border border-border bg-foreground/5 px-3 py-2.5 text-xs break-all">
-                  {published.mcpUrl}
+                  {connectUrl}
                 </code>
                 <motion.button
                   whileHover={{ scale: 1.04 }}
                   whileTap={{ scale: 0.96 }}
-                  onClick={() => copy(published.mcpUrl, "mcp")}
+                  onClick={() => copy(connectUrl, "mcp")}
                   className="shrink-0 cursor-pointer rounded-full bg-foreground text-background px-4 py-2 text-sm font-medium"
                 >
                   <AnimatePresence mode="wait">

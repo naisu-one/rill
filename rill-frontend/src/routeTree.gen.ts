@@ -13,6 +13,8 @@ import { Route as ProtocolsRouteImport } from './routes/protocols'
 import { Route as PitchRouteImport } from './routes/pitch'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as BuilderRouteImport } from './routes/builder'
+import { Route as AuthorizeRouteImport } from './routes/authorize'
+import { Route as AgentWalletRouteImport } from './routes/agent-wallet'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PitchPrintRouteImport } from './routes/pitch_.print'
 
@@ -36,6 +38,16 @@ const BuilderRoute = BuilderRouteImport.update({
   path: '/builder',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthorizeRoute = AuthorizeRouteImport.update({
+  id: '/authorize',
+  path: '/authorize',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentWalletRoute = AgentWalletRouteImport.update({
+  id: '/agent-wallet',
+  path: '/agent-wallet',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -49,6 +61,8 @@ const PitchPrintRoute = PitchPrintRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/agent-wallet': typeof AgentWalletRoute
+  '/authorize': typeof AuthorizeRoute
   '/builder': typeof BuilderRoute
   '/docs': typeof DocsRoute
   '/pitch': typeof PitchRoute
@@ -57,6 +71,8 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/agent-wallet': typeof AgentWalletRoute
+  '/authorize': typeof AuthorizeRoute
   '/builder': typeof BuilderRoute
   '/docs': typeof DocsRoute
   '/pitch': typeof PitchRoute
@@ -66,6 +82,8 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/agent-wallet': typeof AgentWalletRoute
+  '/authorize': typeof AuthorizeRoute
   '/builder': typeof BuilderRoute
   '/docs': typeof DocsRoute
   '/pitch': typeof PitchRoute
@@ -76,16 +94,28 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/agent-wallet'
+    | '/authorize'
     | '/builder'
     | '/docs'
     | '/pitch'
     | '/protocols'
     | '/pitch/print'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/builder' | '/docs' | '/pitch' | '/protocols' | '/pitch/print'
+  to:
+    | '/'
+    | '/agent-wallet'
+    | '/authorize'
+    | '/builder'
+    | '/docs'
+    | '/pitch'
+    | '/protocols'
+    | '/pitch/print'
   id:
     | '__root__'
     | '/'
+    | '/agent-wallet'
+    | '/authorize'
     | '/builder'
     | '/docs'
     | '/pitch'
@@ -95,6 +125,8 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AgentWalletRoute: typeof AgentWalletRoute
+  AuthorizeRoute: typeof AuthorizeRoute
   BuilderRoute: typeof BuilderRoute
   DocsRoute: typeof DocsRoute
   PitchRoute: typeof PitchRoute
@@ -132,6 +164,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BuilderRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/authorize': {
+      id: '/authorize'
+      path: '/authorize'
+      fullPath: '/authorize'
+      preLoaderRoute: typeof AuthorizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agent-wallet': {
+      id: '/agent-wallet'
+      path: '/agent-wallet'
+      fullPath: '/agent-wallet'
+      preLoaderRoute: typeof AgentWalletRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -151,6 +197,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AgentWalletRoute: AgentWalletRoute,
+  AuthorizeRoute: AuthorizeRoute,
   BuilderRoute: BuilderRoute,
   DocsRoute: DocsRoute,
   PitchRoute: PitchRoute,

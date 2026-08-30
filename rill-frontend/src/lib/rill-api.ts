@@ -60,6 +60,33 @@ export type PublishResult = {
     };
   };
   warnings: string[];
+  /** Sui address this skill was published under, when the publish call carried a session token. */
+  owner?: string;
+  /** The single connector URL serving every action this owner has published. Present only for an
+   *  owned skill; prefer showing this over the per-skill `mcpUrl`. */
+  ownerMcpUrl?: string;
+};
+
+export type PublishedSkillSummary = {
+  id: string;
+  name: string;
+  description: string;
+  mcpUrl: string;
+  skillUrl?: string;
+  createdAt: string;
+};
+
+/** The unsigned onboarding plan. `ownerIsAgent` is stated explicitly so the UI can be honest about
+ *  whether this setup actually separates the two roles. */
+export type SetupPlan = {
+  setupPtb: string;
+  tradeCapPtb: string;
+  runSetTemplate: Record<string, unknown>;
+  walletPackageId: string;
+  deepbookPackageId: string;
+  owner: string;
+  agent: string;
+  ownerIsAgent: boolean;
 };
 
 export type ProtocolRegistry = {
@@ -127,10 +154,13 @@ function composeSignal(signal?: AbortSignal): AbortSignal {
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
-async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+async function post<T>(path: string, body: unknown, signal?: AbortSignal, accessToken?: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
     body: JSON.stringify(body),
     signal: composeSignal(signal),
   });
@@ -141,8 +171,65 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
   return json.data;
 }
 
+/** The API's ORIGIN, without the `/api` prefix. The OAuth endpoints live at the origin root
+ *  because RFC 8414/9728 define the discovery paths as origin-relative — see the backend's
+ *  `http/routes/oauth.routes.ts`. */
+const API_ORIGIN = API_BASE.replace(/\/api$/, "");
+
+/** What the sign-in page shows and what the wallet must sign. `message` is passed through to the
+ *  wallet byte-for-byte: the backend generated it, and nothing here may reconstruct or reformat it. */
+export type ConsentPrompt = {
+  requestId: string;
+  clientName: string;
+  scope: string;
+  resource: string;
+  network: string;
+  message: string;
+  expiresAt: string;
+};
+
 export const rillApi = {
   baseUrl: API_BASE,
+  origin: API_ORIGIN,
+
+  /** Read the parked authorize request an agent started. */
+  async consentPrompt(requestId: string, signal?: AbortSignal): Promise<ConsentPrompt> {
+    const res = await fetch(`${API_ORIGIN}/oauth/consent/${encodeURIComponent(requestId)}`, {
+      signal: composeSignal(signal),
+    });
+    const json = await parseJsonResponse<{
+      success?: boolean;
+      data?: ConsentPrompt;
+      error_description?: string;
+    }>(res);
+    if (!res.ok || !json.success || !json.data) {
+      throw new Error(json.error_description ?? `Could not load this sign-in request (${res.status}).`);
+    }
+    return json.data;
+  },
+
+  /** Submit the wallet signature; the response says where to send the browser next. */
+  async completeConsent(
+    requestId: string,
+    signature: string,
+    signal?: AbortSignal,
+  ): Promise<{ redirectTo: string; address: string }> {
+    const res = await fetch(`${API_ORIGIN}/oauth/consent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId, signature }),
+      signal: composeSignal(signal),
+    });
+    const json = await parseJsonResponse<{
+      success?: boolean;
+      data?: { redirectTo: string; address: string };
+      error_description?: string;
+    }>(res);
+    if (!res.ok || !json.success || !json.data) {
+      throw new Error(json.error_description ?? `Sign-in could not be completed (${res.status}).`);
+    }
+    return json.data;
+  },
 
   async health(signal?: AbortSignal) {
     const root = API_BASE.replace(/\/api$/, "");
@@ -172,11 +259,89 @@ export const rillApi = {
     }>("/simulate", { flow }, signal);
   },
 
-  publish(flow: FlowGraph, signal?: AbortSignal) {
-    return post<PublishResult>("/publish", { flow }, signal);
+  /** Publishing WITH a token records the skill's owner, which is what makes it appear on that
+   *  address's single `/mcp` connector. Without one it still publishes, just ownerless — the
+   *  behavior Studio has always had. */
+  publish(flow: FlowGraph, signal?: AbortSignal, accessToken?: string) {
+    return post<PublishResult>("/publish", { flow }, signal, accessToken);
+  },
+
+  /** Step 1 of the first-party Studio sign-in: the exact message the wallet must sign. */
+  async walletChallenge(signal?: AbortSignal): Promise<{ challengeId: string; message: string; expiresAt: string }> {
+    const res = await fetch(`${API_ORIGIN}/oauth/wallet-challenge`, { signal: composeSignal(signal) });
+    const json = await parseJsonResponse<{
+      success?: boolean;
+      data?: { challengeId: string; message: string; expiresAt: string };
+      error_description?: string;
+    }>(res);
+    if (!res.ok || !json.success || !json.data) {
+      throw new Error(json.error_description ?? `Could not start sign-in (${res.status}).`);
+    }
+    return json.data;
+  },
+
+  /** Step 2: exchange the signature for a short-lived access token. */
+  async walletToken(
+    challengeId: string,
+    signature: string,
+    signal?: AbortSignal,
+  ): Promise<{ access_token: string; expires_in: number; address: string }> {
+    const res = await fetch(`${API_ORIGIN}/oauth/wallet-token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ challengeId, signature }),
+      signal: composeSignal(signal),
+    });
+    const json = await parseJsonResponse<{
+      success?: boolean;
+      data?: { access_token: string; expires_in: number; address: string };
+      error_description?: string;
+    }>(res);
+    if (!res.ok || !json.success || !json.data) {
+      throw new Error(json.error_description ?? `Sign-in failed (${res.status}).`);
+    }
+    return json.data;
   },
 
   previewCapabilities(manifest: CapabilityManifest, signal?: AbortSignal) {
     return post<CapabilityPreviewResult>("/capabilities/preview", { manifest }, signal);
+  },
+
+  /** Skills visible to the caller: with a token, the ones that address published; without, only
+   *  ownerless ones. */
+  async skills(accessToken?: string, signal?: AbortSignal): Promise<PublishedSkillSummary[]> {
+    const res = await fetch(`${API_BASE}/skills`, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+      signal: composeSignal(signal),
+    });
+    const json = await parseJsonResponse<{ success: boolean; data?: PublishedSkillSummary[]; error?: string }>(res);
+    if (!res.ok || !json.success || !json.data) {
+      throw new Error(json.error ?? `API error ${res.status}`);
+    }
+    return json.data;
+  },
+
+  /**
+   * Build the two unsigned onboarding transactions. `sender` is the OWNER (who signs and holds the
+   * kill switch); `agent` is the local signer that will spend. Passing a distinct `agent` is what
+   * makes the contract's owner-only guards real — see the backend's `PrepareSetupPlanInput`.
+   */
+  prepareSetup(
+    input: {
+      skillId: string;
+      sender: string;
+      agent?: string;
+      budgetMist: string;
+      perTxMist: string;
+      minimumRemainingMist?: string;
+      expiresAtMs?: string;
+      /** Onboarding-order price in human DeepBook units. Required when the pool's book is empty —
+       *  most DeepBook testnet pools are — because there is then no mid price to derive one from. */
+      price?: number;
+    },
+    signal?: AbortSignal,
+    accessToken?: string,
+  ) {
+    return post<SetupPlan>("/setup/prepare", input, signal, accessToken);
   },
 };
