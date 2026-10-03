@@ -1,3 +1,9 @@
+import {
+  loadGrantState,
+  saveGrantState,
+  type PendingSetup,
+  type Granted,
+} from "@/lib/grant-storage";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   ConnectButton,
@@ -13,14 +19,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  buildMintTradeCapTx,
   buildRevokeTx,
   decodeUnsignedPtb,
   harvestSetupObjects,
   isSelfOnboarding,
   type ObjectChange,
 } from "@/lib/agent-wallet-tx";
-import { rillApi, type PublishedSkillSummary, type SetupPlan } from "@/lib/rill-api";
+import {
+  rillApi,
+  type PublishedSkillSummary,
+  type SetupPlan,
+  type SetupInput,
+} from "@/lib/rill-api";
 import { ensureSession } from "@/lib/rill-session";
 
 /**
@@ -32,8 +42,7 @@ import { ensureSession } from "@/lib/rill-session";
  * signer's self-onboarding path does. Here the OWNER is your browser wallet and the AGENT is the
  * local `rill-wallet` key, so the kill switch genuinely lives somewhere the agent cannot reach.
  *
- * Two signatures, once: create the wallet, then delegate trading. After that the agent transacts on
- * its own key with no approvals at all, bounded by what was granted here.
+ * Two signatures: create an empty wallet, then attach capabilities and fund atomically.
  */
 export const Route = createFileRoute("/agent-wallet")({
   head: () => ({
@@ -55,20 +64,9 @@ function suiToMist(value: string): bigint | null {
   return BigInt(whole) * SUI_PER_MIST + BigInt(fraction.padEnd(9, "0"));
 }
 
-type Granted = {
-  walletId: string;
-  agentCapId: string;
-  balanceManagerId: string;
-  tradeCapId?: string;
-  walletPackageId: string;
-  deepbookPackageId: string;
-  agent: string;
-  runSetTemplate: Record<string, unknown>;
-  digest: string;
-};
-
 function AgentWalletPage() {
   const account = useCurrentAccount();
+  const ownerAddress = account?.address;
   const client = useSuiClient();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
   const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
@@ -77,16 +75,36 @@ function AgentWalletPage() {
   const [skillId, setSkillId] = useState("");
   const [agent, setAgent] = useState("");
   const [budgetSui, setBudgetSui] = useState("1");
-  const [perTxSui, setPerTxSui] = useState("0.2");
+  const [perTxSui, setPerTxSui] = useState("1");
   const [expiryHours, setExpiryHours] = useState("24");
   const [price, setPrice] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingSetup | null>(null);
   const [granted, setGranted] = useState<Granted | null>(null);
+  const [restoredOwner, setRestoredOwner] = useState<string | null>(null);
+  useEffect(() => {
+    const recovered = ownerAddress
+      ? loadGrantState(rillApi.baseUrl, ownerAddress)
+      : { pending: null, granted: null };
+    setPending(recovered.pending);
+    setGranted(recovered.granted);
+    setRestoredOwner(ownerAddress ?? null);
+  }, [ownerAddress]);
+  useEffect(() => {
+    if (!ownerAddress || restoredOwner !== ownerAddress) return;
+    if (pending && pending.input.sender !== ownerAddress) return;
+    if (granted && granted.owner !== ownerAddress) return;
+    if (!saveGrantState(rillApi.baseUrl, ownerAddress, { pending, granted })) {
+      toast.error(
+        "Browser storage is unavailable. Keep this page open until you download the grant files.",
+      );
+    }
+  }, [ownerAddress, restoredOwner, pending, granted]);
 
   /** Load the signed-in address's own skills. Requires a session, since an ownerless listing would
    *  show skills this address cannot bind a wallet for. */
   const loadSkills = useCallback(async () => {
-    if (!account) return;
+    if (!account || busy) return;
     setBusy("Signing in…");
     try {
       const session = await ensureSession(account.address, async (message) => {
@@ -96,128 +114,184 @@ function AgentWalletPage() {
       const list = await rillApi.skills(session.accessToken);
       setSkills(list);
       if (list.length > 0) setSkillId((current) => current || list[0].id);
-      if (list.length === 0) toast.message("No published actions yet", {
-        description: "Publish a flow in the builder first — a wallet is granted per action.",
-      });
+      if (list.length === 0)
+        toast.message("No published actions yet", {
+          description: "Publish a flow in the builder first — a wallet is granted per action.",
+        });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not load your actions.");
     } finally {
       setBusy(null);
     }
-  }, [account, signPersonalMessage]);
+  }, [account, busy, signPersonalMessage]);
 
   useEffect(() => {
     setSkills([]);
-    setGranted(null);
+    setSkillId("");
   }, [account?.address]);
 
-  /** Step 1 — the owner signs `create_wallet`, funding it and naming the agent. */
+  /** Create an empty wallet first. No funds are granted until rules are attached. */
   async function grant() {
-    if (!account) return;
+    if (!account || busy || pending || granted) return;
     const budgetMist = suiToMist(budgetSui);
     const perTxMist = suiToMist(perTxSui);
-    if (budgetMist === null || perTxMist === null) {
-      toast.error("Amounts must be plain decimals, up to 9 places.");
+    if (budgetMist === null || perTxMist === null || budgetMist <= 0n || perTxMist <= 0n) {
+      toast.error("Amounts must be positive plain decimals, up to 9 places.");
       return;
     }
     if (!/^0x[0-9a-fA-F]{64}$/.test(agent.trim())) {
-      toast.error("Agent address must be a full 0x… Sui address — read it from the signer's signer_status tool.");
+      toast.error("Agent address must be a full Sui address from the signer's signer_status tool.");
+      return;
+    }
+    const exactPrice = price.trim();
+    if (exactPrice && (!/^\d+(\.\d+)?$/.test(exactPrice) || !/[1-9]/.test(exactPrice))) {
+      toast.error("Price must be a positive plain decimal.");
       return;
     }
     const hours = Number(expiryHours);
-    if (!Number.isFinite(hours) || hours <= 0) {
-      toast.error("Expiry must be a positive number of hours.");
+    const expiresAtMs = Date.now() + hours * 60 * 60 * 1000;
+    if (!Number.isFinite(hours) || hours <= 0 || !Number.isSafeInteger(expiresAtMs)) {
+      toast.error("Expiry must be a positive number of hours with a valid timestamp.");
       return;
     }
-
-    setBusy("Preparing…");
+    const input: SetupInput = {
+      skillId,
+      sender: account.address,
+      agent: agent.trim(),
+      budgetMist: budgetMist.toString(),
+      perTxMist: perTxMist.toString(),
+      expiresAtMs: String(expiresAtMs),
+      price: exactPrice || undefined,
+    };
+    setBusy("Preparing empty wallet…");
     try {
       const session = await ensureSession(account.address, async (message) => {
         const { signature } = await signPersonalMessage({ message });
         return signature;
       });
-      const plan: SetupPlan = await rillApi.prepareSetup(
-        {
-          skillId,
-          sender: account.address,
-          agent: agent.trim(),
-          budgetMist: budgetMist.toString(),
-          perTxMist: perTxMist.toString(),
-          expiresAtMs: String(Date.now() + hours * 60 * 60 * 1000),
-          price: price.trim() === "" ? undefined : Number(price),
-        },
-        undefined,
-        session.accessToken,
-      );
-
+      const plan = await rillApi.prepareSetup(input, undefined, session.accessToken);
       setBusy("Waiting for your wallet…");
       const result = await signAndExecute({ transaction: decodeUnsignedPtb(plan.setupPtb) });
-
-      setBusy("Confirming on-chain…");
-      const confirmed = await client.waitForTransaction({
-        digest: result.digest,
-        options: { showObjectChanges: true },
+      setPending({ input, plan, digest: result.digest });
+      toast.success("Empty wallet submitted", {
+        description: "Configure and fund it next. Until then, no spending budget is granted.",
       });
-      const harvested = harvestSetupObjects(confirmed.objectChanges as ObjectChange[] | undefined);
-      if (harvested.missing.length > 0) {
-        // Never fabricate ids: a run-set built from a guess points at objects that do not exist.
-        throw new Error(
-          `The wallet transaction succeeded (${result.digest}) but these objects were not found in `
-          + `its effects: ${harvested.missing.join(", ")}.`,
-        );
-      }
-
-      setGranted({
-        walletId: harvested.walletId!,
-        agentCapId: harvested.agentCapId!,
-        balanceManagerId: harvested.balanceManagerId!,
-        walletPackageId: plan.walletPackageId,
-        deepbookPackageId: plan.deepbookPackageId,
-        agent: plan.agent,
-        runSetTemplate: plan.runSetTemplate,
-        digest: result.digest,
-      });
-      toast.success("Agent wallet created", { description: "One more signature delegates trading." });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Granting the wallet failed.");
+      toast.error(err instanceof Error ? err.message : "Creating the wallet failed.");
     } finally {
       setBusy(null);
     }
   }
 
-  /** Step 2 — mint the TradeCap from the new BalanceManager and hand it to the agent. Built here
-   *  from ids we just observed on-chain, never from server bytes carrying a placeholder. */
-  async function delegateTrading() {
-    if (!account || !granted) return;
-    setBusy("Waiting for your wallet…");
+  /** Attach every rule and fund atomically; a rejected signature leaves an empty wallet. */
+  async function attachAndFund() {
+    if (!account || !pending || busy) return;
+    if (account.address !== pending.input.sender) {
+      toast.error("Reconnect the wallet that created this pending setup.");
+      return;
+    }
+    setBusy("Confirming empty wallet…");
     try {
-      const result = await signAndExecute({
-        transaction: buildMintTradeCapTx({
-          deepbookPackageId: granted.deepbookPackageId,
-          balanceManagerId: granted.balanceManagerId,
-          agent: granted.agent,
-        }),
-      });
       const confirmed = await client.waitForTransaction({
-        digest: result.digest,
-        options: { showObjectChanges: true },
+        digest: pending.digest,
+        options: { showObjectChanges: true, showEffects: true },
       });
-      const tradeCapId = (confirmed.objectChanges as ObjectChange[] | undefined)
-        ?.find((change) => change.type === "created" && change.objectType?.includes("::balance_manager::TradeCap"))
-        ?.objectId;
-      if (!tradeCapId) throw new Error(`TradeCap not found in the effects of ${result.digest}.`);
-      setGranted({ ...granted, tradeCapId });
-      toast.success("Trading delegated");
+      if (confirmed.effects?.status.status !== "success") {
+        if (confirmed.effects?.status.status === "failure") setPending(null);
+        throw new Error(
+          confirmed.effects?.status.error ?? "The empty-wallet transaction did not succeed.",
+        );
+      }
+      const objects = harvestSetupObjects(
+        confirmed.objectChanges as ObjectChange[] | undefined,
+        pending.plan.requiresTradeCap,
+      );
+      if (objects.missing.length > 0) {
+        throw new Error(`Setup ${pending.digest} did not return: ${objects.missing.join(", ")}.`);
+      }
+      let attachment = pending.attachment;
+      if (!attachment) {
+        const session = await ensureSession(account.address, async (message) => {
+          const { signature } = await signPersonalMessage({ message });
+          return signature;
+        });
+        setBusy("Preparing rules and funding…");
+        const attached = await rillApi.attachSetup(
+          {
+            ...pending.input,
+            walletId: objects.walletId!,
+            agentCapId: objects.agentCapId!,
+            ...(pending.plan.requiresTradeCap
+              ? {
+                  balanceManagerId: objects.balanceManagerId,
+                  tradeCapId: objects.tradeCapId,
+                  depositCapId: objects.depositCapId,
+                }
+              : {}),
+          },
+          undefined,
+          session.accessToken,
+        );
+        setBusy("Waiting for your wallet…");
+        const result = await signAndExecute({ transaction: decodeUnsignedPtb(attached.attachPtb) });
+        attachment = {
+          digest: result.digest,
+          runSet: attached.runSet,
+          buildArguments: attached.buildArguments,
+        };
+        setPending({ ...pending, attachment });
+      }
+      setBusy("Confirming rules and funding…");
+      const receipt = await client.waitForTransaction({
+        digest: attachment.digest,
+        options: { showEffects: true },
+      });
+      if (receipt.effects?.status.status !== "success") {
+        if (receipt.effects?.status.status === "failure") {
+          setPending({ ...pending, attachment: undefined });
+        }
+        throw new Error(
+          receipt.effects?.status.error ?? "Funding is not confirmed yet. Check its status again.",
+        );
+      }
+      setGranted({
+        walletId: objects.walletId!,
+        agentCapId: objects.agentCapId!,
+        balanceManagerId: objects.balanceManagerId,
+        tradeCapId: objects.tradeCapId,
+        depositCapId: objects.depositCapId,
+        walletPackageId: pending.plan.walletPackageId,
+        owner: pending.input.sender,
+        runSet: attachment.runSet,
+        buildArguments: attachment.buildArguments,
+        digest: attachment.digest,
+      });
+      setPending(null);
+      toast.success("Wallet configured and funded");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Delegating trading failed.");
+      toast.error(err instanceof Error ? err.message : "Configuring the wallet failed.");
     } finally {
       setBusy(null);
     }
+  }
+
+  function downloadArtifact(kind: "runSet" | "buildArguments") {
+    if (!granted) return;
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(granted[kind], null, 2) + "\n"], {
+        type: "application/json",
+      }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = kind === "runSet" ? "rill-run-set.json" : "rill-build-arguments.json";
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   /** The kill switch. Owner-only on-chain, which is exactly why it lives on this page. */
   async function revoke() {
-    if (!account || !granted) return;
+    if (!account || !granted || account.address !== granted.owner) return;
     setBusy("Waiting for your wallet…");
     try {
       const result = await signAndExecute({
@@ -227,7 +301,13 @@ function AgentWalletPage() {
           owner: account.address,
         }),
       });
-      await client.waitForTransaction({ digest: result.digest });
+      const receipt = await client.waitForTransaction({
+        digest: result.digest,
+        options: { showEffects: true },
+      });
+      if (receipt.effects?.status.status !== "success") {
+        throw new Error(receipt.effects?.status.error ?? "Revocation is not confirmed yet.");
+      }
       toast.success("Revoked", { description: "The remaining budget is back in your wallet." });
       setGranted(null);
     } catch (err) {
@@ -237,7 +317,9 @@ function AgentWalletPage() {
     }
   }
 
-  const selfOnboarding = account ? isSelfOnboarding(account.address, agent || account.address) : false;
+  const selfOnboarding = account
+    ? isSelfOnboarding(account.address, agent || account.address)
+    : false;
 
   return (
     <div className="min-h-screen">
@@ -246,10 +328,9 @@ function AgentWalletPage() {
         <div className="text-xs uppercase tracking-widest text-muted-foreground">Agent wallet</div>
         <h1 className="mt-2 font-display text-4xl tracking-tight">Grant a bounded budget</h1>
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-          Two signatures, once. After this your agent transacts on its own local key with no
-          approvals at all — every spend bounded on-chain by the budget and per-transaction cap you
-          set here, and revocable by you at any time. Your wallet is not asked to sign anything the
-          agent does afterwards.
+          First create an empty wallet, then attach its capabilities and fund it in one transaction.
+          After both signatures, your agent can spend within the granted limits. You keep the
+          ability to revoke the wallet and reclaim its remaining budget.
         </p>
 
         {!account ? (
@@ -265,7 +346,11 @@ function AgentWalletPage() {
             <div>
               <div className="flex items-center justify-between gap-3">
                 <Label>Action</Label>
-                <button onClick={loadSkills} className="cursor-pointer text-xs underline text-muted-foreground">
+                <button
+                  onClick={loadSkills}
+                  disabled={Boolean(busy)}
+                  className="cursor-pointer text-xs underline text-muted-foreground"
+                >
                   {skills.length > 0 ? "Reload" : "Load my published actions"}
                 </button>
               </div>
@@ -276,7 +361,9 @@ function AgentWalletPage() {
               >
                 {skills.length === 0 && <option value="">— load your actions first —</option>}
                 {skills.map((skill) => (
-                  <option key={skill.id} value={skill.id}>{skill.name} · {skill.id}</option>
+                  <option key={skill.id} value={skill.id}>
+                    {skill.name} · {skill.id}
+                  </option>
                 ))}
               </select>
             </div>
@@ -292,8 +379,8 @@ function AgentWalletPage() {
               />
               {agent && selfOnboarding && (
                 <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-500">
-                  That is your own address. The wallet would still work, but the agent would hold its
-                  own kill switch and could lift its own limits — use the local signer's address
+                  That is your own address. The wallet would still work, but the agent would hold
+                  its own kill switch and could lift its own limits — use the local signer's address
                   instead.
                 </p>
               )}
@@ -309,54 +396,114 @@ function AgentWalletPage() {
                 className="mt-1.5"
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
-                Onboarding places one deliberately-far order that should never fill. Its price comes
-                from the live mid by default — but most DeepBook testnet pools have an empty book and
-                no mid price, and then this is required. Set it well above the market.
+                For DeepBook actions, provide the exact decimal order price when the testnet order
+                book has no live mid price. Swap and stake actions do not need this field.
               </p>
             </div>
 
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label htmlFor="budget">Budget (SUI)</Label>
-                <Input id="budget" value={budgetSui} onChange={(e) => setBudgetSui(e.target.value)} className="mt-1.5" />
+                <Input
+                  id="budget"
+                  value={budgetSui}
+                  onChange={(e) => setBudgetSui(e.target.value)}
+                  className="mt-1.5"
+                />
               </div>
               <div>
                 <Label htmlFor="pertx">Per-tx max (SUI)</Label>
-                <Input id="pertx" value={perTxSui} onChange={(e) => setPerTxSui(e.target.value)} className="mt-1.5" />
+                <Input
+                  id="pertx"
+                  value={perTxSui}
+                  onChange={(e) => setPerTxSui(e.target.value)}
+                  className="mt-1.5"
+                />
               </div>
               <div>
                 <Label htmlFor="expiry">Expires in (h)</Label>
-                <Input id="expiry" value={expiryHours} onChange={(e) => setExpiryHours(e.target.value)} className="mt-1.5" />
+                <Input
+                  id="expiry"
+                  value={expiryHours}
+                  onChange={(e) => setExpiryHours(e.target.value)}
+                  className="mt-1.5"
+                />
               </div>
             </div>
 
-            {!granted ? (
+            {pending ? (
+              <div className="space-y-3 rounded-xl border border-border p-4">
+                <div className="text-sm font-medium">
+                  {pending.attachment ? "Funding submitted" : "Empty wallet pending configuration"}
+                </div>
+                <p className="break-all font-mono text-xs text-muted-foreground">
+                  {pending.attachment?.digest ?? pending.digest}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {pending.attachment
+                    ? "Check the submitted transaction before downloading your run set. No further signature is needed."
+                    : "The next signature attaches capabilities and funds the wallet. If you cancel, it keeps no spending budget. Retry this step to continue."}
+                </p>
+                {account.address !== pending.input.sender && (
+                  <p className="text-xs text-amber-600">
+                    Reconnect {pending.input.sender} to continue.
+                  </p>
+                )}
+                <Button
+                  onClick={attachAndFund}
+                  disabled={Boolean(busy) || account.address !== pending.input.sender}
+                >
+                  {busy ??
+                    (pending.attachment ? "Check funding status" : "Configure & fund wallet")}
+                </Button>
+              </div>
+            ) : !granted ? (
               <Button onClick={grant} disabled={Boolean(busy) || !skillId || !agent}>
-                {busy ?? "Create agent wallet"}
+                {busy ?? "Create empty wallet"}
               </Button>
             ) : (
               <div className="space-y-4 rounded-xl border border-border p-4">
                 <div className="text-sm font-medium">Granted</div>
                 <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-xs">
-                  <dt className="text-muted-foreground">wallet</dt><dd className="break-all">{granted.walletId}</dd>
-                  <dt className="text-muted-foreground">agentCap</dt><dd className="break-all">{granted.agentCapId}</dd>
-                  <dt className="text-muted-foreground">manager</dt><dd className="break-all">{granted.balanceManagerId}</dd>
-                  <dt className="text-muted-foreground">tradeCap</dt>
-                  <dd className="break-all">{granted.tradeCapId ?? "— not delegated yet —"}</dd>
+                  <dt className="text-muted-foreground">wallet</dt>
+                  <dd className="break-all">{granted.walletId}</dd>
+                  <dt className="text-muted-foreground">agentCap</dt>
+                  <dd className="break-all">{granted.agentCapId}</dd>
+                  {granted.balanceManagerId && (
+                    <>
+                      <dt className="text-muted-foreground">manager</dt>
+                      <dd className="break-all">{granted.balanceManagerId}</dd>
+                    </>
+                  )}
+                  {granted.tradeCapId && (
+                    <>
+                      <dt className="text-muted-foreground">tradeCap</dt>
+                      <dd className="break-all">{granted.tradeCapId}</dd>
+                    </>
+                  )}
+                  {granted.depositCapId && (
+                    <>
+                      <dt className="text-muted-foreground">depositCap</dt>
+                      <dd className="break-all">{granted.depositCapId}</dd>
+                    </>
+                  )}
                 </dl>
                 <div className="flex flex-wrap gap-2">
-                  {!granted.tradeCapId && (
-                    <Button onClick={delegateTrading} disabled={Boolean(busy)}>
-                      {busy ?? "Delegate trading"}
-                    </Button>
-                  )}
-                  <Button variant="outline" onClick={revoke} disabled={Boolean(busy)}>
+                  <Button onClick={() => downloadArtifact("runSet")}>Download run set</Button>
+                  <Button variant="outline" onClick={() => downloadArtifact("buildArguments")}>
+                    Download build arguments
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={revoke}
+                    disabled={Boolean(busy) || account.address !== granted.owner}
+                  >
                     Revoke &amp; reclaim
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Revoking marks the wallet revoked on-chain and returns the remaining budget to you.
-                  The agent's next attempt fails before it ever signs.
+                  Revoking marks the wallet revoked on-chain and returns the remaining budget to
+                  you. The agent's next attempt fails before it ever signs.
                 </p>
               </div>
             )}

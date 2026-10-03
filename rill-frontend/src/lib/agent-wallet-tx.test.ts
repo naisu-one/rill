@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { Transaction } from "@mysten/sui/transactions";
 import {
-  base64ToUtf8,
-  buildMintTradeCapTx,
   buildRevokeTx,
+  decodeUnsignedPtb,
   findCreatedObjectId,
   harvestSetupObjects,
   isSelfOnboarding,
@@ -15,27 +15,29 @@ const OWNER = id(1);
 const AGENT = id(2);
 const PKG = id(3);
 
+describe("Rust unsigned transaction decoding", () => {
+  it("decodes BCS TransactionKind and leaves sender and gas to the browser wallet", async () => {
+    const source = new Transaction();
+    const [coin] = source.splitCoins(source.gas, [source.pure.u64("123456789")]);
+    source.transferObjects([coin], OWNER);
+    const bytes = await source.build({ onlyTransactionKind: true });
+    const decoded = decodeUnsignedPtb(Buffer.from(bytes).toString("base64"));
+    expect(await decoded.build({ onlyTransactionKind: true })).toEqual(bytes);
+    expect(decoded.getData().sender).toBeNull();
+    expect(decoded.getData().gasData.payment).toBeNull();
+  });
+});
+
 /** MoveCall targets in the built transaction, in order. */
 function targets(tx: ReturnType<typeof buildRevokeTx>): string[] {
-  return tx.getData().commands
-    .filter((command) => command.MoveCall)
+  return tx
+    .getData()
+    .commands.filter((command) => command.MoveCall)
     .map((command) => {
       const call = command.MoveCall!;
       return `${call.package}::${call.module}::${call.function}`;
     });
 }
-
-describe("buildMintTradeCapTx", () => {
-  it("mints from the BalanceManager and transfers the cap onward", () => {
-    const tx = buildMintTradeCapTx({
-      deepbookPackageId: PKG,
-      balanceManagerId: id(4),
-      agent: AGENT,
-    });
-    expect(targets(tx)).toEqual([`${PKG}::balance_manager::mint_trade_cap`]);
-    expect(tx.getData().commands.some((command) => command.TransferObjects)).toBe(true);
-  });
-});
 
 describe("buildRevokeTx", () => {
   it("calls revoke and returns the reclaimed balance to the owner", () => {
@@ -64,11 +66,38 @@ describe("buildRevokeTx", () => {
 
 describe("harvesting created objects", () => {
   const changes: ObjectChange[] = [
-    { type: "mutated", objectId: id(6), objectType: `${PKG}::agent_wallet::AgentWallet<${SUI_COIN_TYPE}>` },
-    { type: "created", objectId: id(7), objectType: `${PKG}::agent_wallet::AgentWallet<${SUI_COIN_TYPE}>` },
+    {
+      type: "mutated",
+      objectId: id(6),
+      objectType: `${PKG}::agent_wallet::AgentWallet<${SUI_COIN_TYPE}>`,
+    },
+    {
+      type: "created",
+      objectId: id(7),
+      objectType: `${PKG}::agent_wallet::AgentWallet<${SUI_COIN_TYPE}>`,
+    },
     { type: "created", objectId: id(8), objectType: `${PKG}::agent_wallet::AgentCap` },
     { type: "created", objectId: id(9), objectType: `${PKG}::balance_manager::BalanceManager` },
   ];
+
+  it("requires all DeepBook caps created before the wallet is funded", () => {
+    expect(harvestSetupObjects(changes, true).missing).toEqual(["TradeCap", "DepositCap"]);
+    const harvested = harvestSetupObjects(
+      [
+        ...changes,
+        { type: "created", objectId: id(4), objectType: `${PKG}::balance_manager::TradeCap` },
+        { type: "created", objectId: id(5), objectType: `${PKG}::balance_manager::DepositCap` },
+      ],
+      true,
+    );
+    expect(harvested.missing).toEqual([]);
+    expect(harvested.tradeCapId).toBe(id(4));
+    expect(harvested.depositCapId).toBe(id(5));
+  });
+
+  it("does not require DeepBook objects for a swap or stake wallet", () => {
+    expect(harvestSetupObjects(changes.slice(0, 3), false).missing).toEqual([]);
+  });
 
   // Picking up a mutated object as "the new wallet" would point the run-set at something the user
   // never granted in this transaction.
@@ -76,8 +105,8 @@ describe("harvesting created objects", () => {
     expect(findCreatedObjectId(changes, "::agent_wallet::AgentWallet")).toBe(id(7));
   });
 
-  it("harvests all three onboarding objects in one pass", () => {
-    const harvested = harvestSetupObjects(changes);
+  it("harvests wallet and optional manager objects in one pass", () => {
+    const harvested = harvestSetupObjects(changes, false);
     expect(harvested).toMatchObject({
       walletId: id(7),
       agentCapId: id(8),
@@ -89,12 +118,16 @@ describe("harvesting created objects", () => {
   it("names exactly what is missing rather than failing opaquely", () => {
     const partial = harvestSetupObjects([changes[1]]);
     expect(partial.walletId).toBe(id(7));
-    expect(partial.missing).toEqual(["AgentCap", "BalanceManager"]);
+    expect(partial.missing).toEqual(["AgentCap", "BalanceManager", "TradeCap", "DepositCap"]);
   });
 
   it("treats absent object changes as everything missing", () => {
     expect(harvestSetupObjects(undefined).missing).toEqual([
-      "AgentWallet", "AgentCap", "BalanceManager",
+      "AgentWallet",
+      "AgentCap",
+      "BalanceManager",
+      "TradeCap",
+      "DepositCap",
     ]);
   });
 });
@@ -106,20 +139,5 @@ describe("isSelfOnboarding", () => {
     expect(isSelfOnboarding(OWNER, OWNER)).toBe(true);
     expect(isSelfOnboarding(OWNER, ` ${OWNER.toUpperCase()} `)).toBe(true);
     expect(isSelfOnboarding(OWNER, AGENT)).toBe(false);
-  });
-});
-
-describe("base64ToUtf8", () => {
-  // atob returns bytes-as-characters; decoding them as UTF-8 is what keeps a payload intact.
-  it("round-trips multi-byte UTF-8 that a naive atob would mangle", () => {
-    const original = JSON.stringify({ label: "sui → deepbook", note: "café ✓" });
-    const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(original)));
-    expect(base64ToUtf8(encoded)).toBe(original);
-    expect(atob(encoded)).not.toBe(original);
-  });
-
-  it("round-trips plain ASCII unchanged", () => {
-    const original = '{"version":2,"commands":[]}';
-    expect(base64ToUtf8(btoa(original))).toBe(original);
   });
 });

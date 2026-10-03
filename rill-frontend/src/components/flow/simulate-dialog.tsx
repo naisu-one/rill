@@ -125,7 +125,7 @@ export function SimulateDialog({
       .join("\n");
 
   const gasSui = result?.simulation.gasEstimate
-    ? (result.simulation.gasEstimate / 1e9).toFixed(4)
+    ? `${BigInt(result.simulation.gasEstimate) / 1_000_000_000n}.${((BigInt(result.simulation.gasEstimate) % 1_000_000_000n) / 100_000n).toString().padStart(4, "0")}`
     : null;
 
   return (
@@ -179,7 +179,8 @@ export function SimulateDialog({
                 <AlertTriangle className="h-4 w-4 text-peach-foreground" />
                 <span className="text-peach-foreground">
                   Simulation unverified:{" "}
-                  {result?.simulation.error ?? "No reason returned by backend"}. Signing is blocked.
+                  {result?.simulation.error ?? "Preview completed without ownership or gas checks"}.
+                  Execution requires a fresh verified simulation.
                 </span>
               </>
             )}
@@ -209,8 +210,8 @@ export function SimulateDialog({
 
           <div className="mt-3 space-y-2">
             <EnforceRow icon={KeyRound} tone="sky" title="Keyless & unsigned">
-              Rill returns an <strong>unsigned PTB</strong>. Only your local signer signs and submits
-              — the backend never holds keys.
+              Rill returns an <strong>unsigned PTB</strong>. Only your local signer signs and
+              submits — the backend never holds keys.
             </EnforceRow>
             <EnforceRow icon={ShieldCheck} tone="mint" title="Wallet capabilities">
               Spend caps and the swap slippage floor are wallet-level, enforced by the Rill compiler
@@ -234,7 +235,9 @@ export function SimulateDialog({
                   <div
                     key={n.id}
                     className={`rounded-lg border px-3 py-2 text-xs ${
-                      valid ? "border-border bg-background/60" : "border-destructive/40 bg-destructive/5"
+                      valid
+                        ? "border-border bg-background/60"
+                        : "border-destructive/40 bg-destructive/5"
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">

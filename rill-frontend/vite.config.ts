@@ -2,14 +2,14 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
-  server: {
-    port: 5173,
-  },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     server: { entry: "server" },
   },
   vite: {
+    server: {
+      port: 5173,
+    },
     ssr: {
       // @lobehub/icons' ES build (and its transitive @lobehub/* deps, e.g.
       // fluent-emoji) re-export directories without an explicit index file —

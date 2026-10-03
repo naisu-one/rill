@@ -13,7 +13,7 @@ import { rillApi } from "./rill-api";
  * prompt — so there is no reason to persist it further.
  */
 
-const STORAGE_KEY = "rill.session.v1";
+export const SESSION_STORAGE_KEY = `rill.session.v2:${rillApi.origin}`;
 /** Refresh a little before the real expiry so a publish can't be issued with a token that dies
  *  mid-flight. */
 const EXPIRY_SKEW_MS = 30_000;
@@ -24,27 +24,32 @@ export type RillSession = {
   expiresAtMs: number;
 };
 
-function isUsable(session: RillSession | null, address: string, nowMs: number): session is RillSession {
+function isUsable(
+  session: RillSession | null,
+  address: string,
+  nowMs: number,
+): session is RillSession {
   return (
-    session !== null
+    session !== null &&
     // A session belongs to ONE address. Switching wallets in the middle of a Studio visit must
     // re-sign rather than silently publish under the previous address.
-    && session.address === address
-    && session.expiresAtMs - EXPIRY_SKEW_MS > nowMs
+    session.address === address &&
+    session.expiresAtMs - EXPIRY_SKEW_MS > nowMs
   );
 }
 
 export function loadSession(): RillSession | null {
   if (typeof sessionStorage === "undefined") return null;
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<RillSession>;
     if (
-      typeof parsed.accessToken !== "string"
-      || typeof parsed.address !== "string"
-      || typeof parsed.expiresAtMs !== "number"
-    ) return null;
+      typeof parsed.accessToken !== "string" ||
+      typeof parsed.address !== "string" ||
+      typeof parsed.expiresAtMs !== "number"
+    )
+      return null;
     return parsed as RillSession;
   } catch {
     // Corrupt or unreadable (private mode, cleared storage) — treat as signed out, never throw.
@@ -55,7 +60,7 @@ export function loadSession(): RillSession | null {
 export function saveSession(session: RillSession): void {
   if (typeof sessionStorage === "undefined") return;
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
   } catch {
     // Storage can be unavailable or full; the session still works for this page's lifetime.
   }
@@ -64,7 +69,7 @@ export function saveSession(session: RillSession): void {
 export function clearSession(): void {
   if (typeof sessionStorage === "undefined") return;
   try {
-    sessionStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
   } catch {
     // Nothing to do — see saveSession.
   }

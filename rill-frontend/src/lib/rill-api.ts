@@ -1,6 +1,6 @@
 import type { CapabilityManifest } from "../../../packages/rill-sdk/src";
 
-const API_FALLBACK = "https://api.rill.naisu.one/api";
+const API_FALLBACK = "http://localhost:3939/api";
 
 function normalizeApiBase(raw: string): string {
   const trimmed = raw.replace(/\/$/, "");
@@ -38,7 +38,7 @@ export type SimulationResult = {
   ok: boolean;
   verification: "verified" | "unverified";
   error?: string;
-  gasEstimate: number;
+  gasEstimate: string;
   balanceChanges?: unknown[];
   objectChanges?: unknown[];
 };
@@ -76,17 +76,39 @@ export type PublishedSkillSummary = {
   createdAt: string;
 };
 
-/** The unsigned onboarding plan. `ownerIsAgent` is stated explicitly so the UI can be honest about
- *  whether this setup actually separates the two roles. */
+/** Empty-wallet creation plan. Rules and funding follow through /setup/attach. */
 export type SetupPlan = {
   setupPtb: string;
-  tradeCapPtb: string;
   runSetTemplate: Record<string, unknown>;
+  requiresTradeCap: boolean;
+  versionId: string;
+  capabilityManifest: CapabilityManifest;
+  budgetMist: string;
   walletPackageId: string;
   deepbookPackageId: string;
   owner: string;
   agent: string;
   ownerIsAgent: boolean;
+};
+
+export type SetupInput = {
+  skillId: string;
+  sender: string;
+  agent?: string;
+  budgetMist: string;
+  perTxMist: string;
+  minimumRemainingMist?: string;
+  expiresAtMs?: string;
+  /** Exact human decimal; never converted through a JavaScript number. */
+  price?: string;
+};
+
+export type AttachSetupInput = SetupInput & {
+  walletId: string;
+  agentCapId: string;
+  balanceManagerId?: string;
+  tradeCapId?: string;
+  depositCapId?: string;
 };
 
 export type ProtocolRegistry = {
@@ -154,7 +176,12 @@ function composeSignal(signal?: AbortSignal): AbortSignal {
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
-async function post<T>(path: string, body: unknown, signal?: AbortSignal, accessToken?: string): Promise<T> {
+async function post<T>(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+  accessToken?: string,
+): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: {
@@ -203,7 +230,9 @@ export const rillApi = {
       error_description?: string;
     }>(res);
     if (!res.ok || !json.success || !json.data) {
-      throw new Error(json.error_description ?? `Could not load this sign-in request (${res.status}).`);
+      throw new Error(
+        json.error_description ?? `Could not load this sign-in request (${res.status}).`,
+      );
     }
     return json.data;
   },
@@ -239,7 +268,11 @@ export const rillApi = {
 
   async protocols(signal?: AbortSignal) {
     const res = await fetch(`${API_BASE}/protocols`, { signal: composeSignal(signal) });
-    const json = await parseJsonResponse<{ success: boolean; data?: ProtocolRegistry; error?: string }>(res);
+    const json = await parseJsonResponse<{
+      success: boolean;
+      data?: ProtocolRegistry;
+      error?: string;
+    }>(res);
     if (!res.ok || !json.success || !json.data) {
       throw new Error(json.error ?? `API error ${res.status}`);
     }
@@ -262,13 +295,27 @@ export const rillApi = {
   /** Publishing WITH a token records the skill's owner, which is what makes it appear on that
    *  address's single `/mcp` connector. Without one it still publishes, just ownerless — the
    *  behavior Studio has always had. */
-  publish(flow: FlowGraph, signal?: AbortSignal, accessToken?: string) {
-    return post<PublishResult>("/publish", { flow }, signal, accessToken);
+  publish(
+    flow: FlowGraph,
+    signal?: AbortSignal,
+    accessToken?: string,
+    manifest?: CapabilityManifest,
+  ) {
+    return post<PublishResult>(
+      "/publish",
+      { flow, ...(manifest ? { manifest } : {}) },
+      signal,
+      accessToken,
+    );
   },
 
   /** Step 1 of the first-party Studio sign-in: the exact message the wallet must sign. */
-  async walletChallenge(signal?: AbortSignal): Promise<{ challengeId: string; message: string; expiresAt: string }> {
-    const res = await fetch(`${API_ORIGIN}/oauth/wallet-challenge`, { signal: composeSignal(signal) });
+  async walletChallenge(
+    signal?: AbortSignal,
+  ): Promise<{ challengeId: string; message: string; expiresAt: string }> {
+    const res = await fetch(`${API_ORIGIN}/oauth/wallet-challenge`, {
+      signal: composeSignal(signal),
+    });
     const json = await parseJsonResponse<{
       success?: boolean;
       data?: { challengeId: string; message: string; expiresAt: string };
@@ -314,7 +361,11 @@ export const rillApi = {
       headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
       signal: composeSignal(signal),
     });
-    const json = await parseJsonResponse<{ success: boolean; data?: PublishedSkillSummary[]; error?: string }>(res);
+    const json = await parseJsonResponse<{
+      success: boolean;
+      data?: PublishedSkillSummary[];
+      error?: string;
+    }>(res);
     if (!res.ok || !json.success || !json.data) {
       throw new Error(json.error ?? `API error ${res.status}`);
     }
@@ -322,26 +373,18 @@ export const rillApi = {
   },
 
   /**
-   * Build the two unsigned onboarding transactions. `sender` is the OWNER (who signs and holds the
-   * kill switch); `agent` is the local signer that will spend. Passing a distinct `agent` is what
-   * makes the contract's owner-only guards real — see the backend's `PrepareSetupPlanInput`.
+   * Build empty-wallet creation. `sender` is the owner; `agent` is the local signer that will spend.
+   * The setup receipt supplies object IDs to attachSetup before any funds enter the wallet.
    */
-  prepareSetup(
-    input: {
-      skillId: string;
-      sender: string;
-      agent?: string;
-      budgetMist: string;
-      perTxMist: string;
-      minimumRemainingMist?: string;
-      expiresAtMs?: string;
-      /** Onboarding-order price in human DeepBook units. Required when the pool's book is empty —
-       *  most DeepBook testnet pools are — because there is then no mid price to derive one from. */
-      price?: number;
-    },
-    signal?: AbortSignal,
-    accessToken?: string,
-  ) {
+  prepareSetup(input: SetupInput, signal?: AbortSignal, accessToken?: string) {
     return post<SetupPlan>("/setup/prepare", input, signal, accessToken);
+  },
+
+  attachSetup(input: AttachSetupInput, signal?: AbortSignal, accessToken?: string) {
+    return post<{
+      attachPtb: string;
+      runSet: Record<string, unknown>;
+      buildArguments: Record<string, unknown>;
+    }>("/setup/attach", input, signal, accessToken);
   },
 };

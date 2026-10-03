@@ -14,6 +14,7 @@ import { rillApi, type PublishResult } from "@/lib/rill-api";
 import { useCurrentAccount, useSignPersonalMessage } from "@mysten/dapp-kit";
 import { ensureSession } from "@/lib/rill-session";
 import { useFlowRequest } from "@/lib/use-flow-request";
+import { validateManifest, type CapabilityManifest } from "@/lib/capabilities";
 import {
   loadPublishRecordFromStorage,
   savePublishRecordToStorage,
@@ -48,18 +49,39 @@ const fadeUp = {
 export function ExportDialog({
   nodes,
   edges,
+  manifest,
   open,
   onOpenChange,
 }: {
   nodes: Node[];
   edges: Edge[];
+  manifest: CapabilityManifest;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const actions = nodes.filter((n) => n.type === "action").map((n) => n.data as ActionNodeData);
   const graph = useMemo(() => buildFlowGraph(nodes, edges), [nodes, edges]);
-  const hash = useMemo(() => hashFlowGraph(graph), [graph]);
-  const gate = useMemo(() => computePublishGate(nodes, edges), [nodes, edges]);
+  const account = useCurrentAccount();
+  const hash = useMemo(
+    () =>
+      hashFlowGraph(graph, {
+        apiBase: rillApi.baseUrl,
+        owner: account?.address,
+        manifest,
+      }),
+    [graph, account?.address, manifest],
+  );
+  const gate = useMemo(() => {
+    const flowGate = computePublishGate(nodes, edges);
+    if (!flowGate.publishable) return flowGate;
+    const validation = validateManifest(manifest);
+    return validation.ok
+      ? flowGate
+      : {
+          publishable: false,
+          reason: `Configure wallet capabilities before publishing: ${validation.error}`,
+        };
+  }, [nodes, edges, manifest]);
 
   const [storedRecord, setStoredRecord] = useState<StoredPublishRecord | null>(null);
   const [copied, setCopied] = useState<"mcp" | "config" | null>(null);
@@ -69,11 +91,13 @@ export function ExportDialog({
   // avoid a race where the graph changes again while the request is in flight.
   const publishedForHashRef = useRef<string | null>(null);
 
-  const account = useCurrentAccount();
   const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
   // The session token captured at click time, so the in-flight request always uses the token that
   // was proved for THIS publish rather than whatever lands in storage later.
   const sessionTokenRef = useRef<string | undefined>(undefined);
+  const publishPayloadRef = useRef({ flow: graph, manifest });
+  const currentContextRef = useRef({ hash, open });
+  currentContextRef.current = { hash, open };
   const [signingIn, setSigningIn] = useState(false);
 
   const {
@@ -83,7 +107,12 @@ export function ExportDialog({
     run: doPublish,
     reset: resetPublish,
   } = useFlowRequest<PublishResult>((signal) =>
-    rillApi.publish({ nodes: graph.nodes, edges: graph.edges }, signal, sessionTokenRef.current),
+    rillApi.publish(
+      publishPayloadRef.current.flow,
+      signal,
+      sessionTokenRef.current,
+      publishPayloadRef.current.manifest,
+    ),
   );
 
   // Re-read localStorage every time the dialog opens — this component is now
@@ -115,7 +144,8 @@ export function ExportDialog({
 
   const published = storedRecord && storedRecord.hash === hash ? storedRecord.result : null;
   const staleRecord = storedRecord && storedRecord.hash !== hash ? storedRecord : null;
-  const justPublished = published !== null && freshResult !== null && publishedForHashRef.current === hash;
+  const justPublished =
+    published !== null && freshResult !== null && publishedForHashRef.current === hash;
 
   const handlePublish = async () => {
     if (!gate.publishable) {
@@ -123,9 +153,9 @@ export function ExportDialog({
       return;
     }
 
-    // Publishing while signed in records the owner, which is what puts this action on the single
-    // connector URL. A connected wallet that declines to sign still publishes — just ownerless,
-    // exactly as Studio behaved before sessions existed — so a refused prompt never blocks the demo.
+    if (signingIn || publishing) return;
+    const snapshot = { flow: structuredClone(graph), manifest: structuredClone(manifest), hash };
+    // A connected wallet must prove ownership before publishing its action.
     sessionTokenRef.current = undefined;
     if (account) {
       setSigningIn(true);
@@ -136,18 +166,19 @@ export function ExportDialog({
         });
         sessionTokenRef.current = session.accessToken;
       } catch (err) {
-        toast.message("Publishing without signing in", {
-          description:
-            err instanceof Error && /reject|denied|cancel/i.test(err.message)
-              ? "This action won't appear on your single connector URL."
-              : "Wallet sign-in failed; this action won't appear on your single connector URL.",
-        });
+        toast.error(err instanceof Error ? err.message : "Wallet sign-in failed.");
+        return;
       } finally {
         setSigningIn(false);
       }
     }
 
-    publishedForHashRef.current = hash;
+    if (!currentContextRef.current.open || currentContextRef.current.hash !== snapshot.hash) {
+      toast.message("The flow or wallet changed. Review it before publishing again.");
+      return;
+    }
+    publishPayloadRef.current = snapshot;
+    publishedForHashRef.current = snapshot.hash;
     doPublish();
   };
 
@@ -176,7 +207,7 @@ export function ExportDialog({
    * every action this address publishes and needs no reconnection when another is added later; an
    * ownerless one falls back to its per-skill URL, which is all it can be reached at.
    */
-  const connectUrl = published ? published.ownerMcpUrl ?? published.mcpUrl : "";
+  const connectUrl = published ? (published.ownerMcpUrl ?? published.mcpUrl) : "";
 
   const claudeConfig = useMemo(() => {
     if (!published) return "";
@@ -205,7 +236,11 @@ export function ExportDialog({
 
   const flowSummary = actions.map((a) => `${a.protocol} · ${a.action}`).join(" → ");
 
-  const title = publishing ? "Publishing flow…" : published ? "MCP server ready" : "Review & publish";
+  const title = publishing
+    ? "Publishing flow…"
+    : published
+      ? "MCP server ready"
+      : "Review & publish";
   const description = publishing
     ? "Publishing action metadata and registering the bounded Rill tools."
     : published
@@ -213,7 +248,13 @@ export function ExportDialog({
       : "Nothing is sent until you click Publish below.";
 
   return (
-    <DialogShell open={open} onOpenChange={onOpenChange} eyebrow="Publish" title={title} description={description}>
+    <DialogShell
+      open={open}
+      onOpenChange={onOpenChange}
+      eyebrow="Publish"
+      title={title}
+      description={description}
+    >
       {(graph.skipped.length > 0 || graph.skippedEdges.length > 0) && (
         <div className="px-5 pt-4">
           <FlowWarningsBanner skippedNodes={graph.skipped} skippedEdges={graph.skippedEdges} />
@@ -274,7 +315,8 @@ export function ExportDialog({
                 <div className="text-[11px] leading-relaxed">
                   <div className="font-medium text-foreground">MCP server</div>
                   <p className="text-muted-foreground">
-                    A live endpoint agents call — every build is bounded by your wallet capabilities.
+                    A live endpoint agents call — every build is bounded by your wallet
+                    capabilities.
                   </p>
                 </div>
               </div>
@@ -298,8 +340,11 @@ export function ExportDialog({
               >
                 <p className="font-medium">Unpublished — flow changed</p>
                 <p className="mt-1">
-                  This flow was edited since it was last published. The previous MCP URL belongs to an earlier
-                  version: <code className="break-all text-[10px] opacity-80">{staleRecord.result.mcpUrl}</code>
+                  This flow was edited since it was last published. The previous MCP URL belongs to
+                  an earlier version:{" "}
+                  <code className="break-all text-[10px] opacity-80">
+                    {staleRecord.result.mcpUrl}
+                  </code>
                 </p>
               </motion.div>
             )}
@@ -388,7 +433,12 @@ export function ExportDialog({
                         <Check className="h-3.5 w-3.5" /> Copied
                       </motion.span>
                     ) : (
-                      <motion.span key="copy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      <motion.span
+                        key="copy"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                      >
                         Copy URL
                       </motion.span>
                     )}
@@ -403,10 +453,17 @@ export function ExportDialog({
             >
               <p className="font-medium">How to use</p>
               <ol className="list-decimal list-inside text-muted-foreground space-y-1 text-xs">
-                <li>Copy the MCP URL above and add it as <code className="text-foreground">rill-actions</code></li>
-                <li>Call <code className="text-foreground">list_actions</code>, then <code className="text-foreground">describe_action</code></li>
                 <li>
-                  Call <code className="text-foreground">build_action</code> with public wallet IDs and runtime params → get an unsigned ExecutionEnvelope
+                  Copy the MCP URL above and add it as{" "}
+                  <code className="text-foreground">rill-actions</code>
+                </li>
+                <li>
+                  Call <code className="text-foreground">list_actions</code>, then{" "}
+                  <code className="text-foreground">describe_action</code>
+                </li>
+                <li>
+                  Call <code className="text-foreground">build_action</code> with public wallet IDs
+                  and runtime params → get an unsigned ExecutionEnvelope
                 </li>
               </ol>
             </motion.div>
@@ -434,7 +491,10 @@ export function ExportDialog({
             )}
 
             {published.skillUrl && (
-              <motion.p variants={fadeUp} className="text-xs text-muted-foreground border-t border-border pt-3">
+              <motion.p
+                variants={fadeUp}
+                className="text-xs text-muted-foreground border-t border-border pt-3"
+              >
                 Need human-readable docs?{" "}
                 <a
                   href={published.skillUrl}
@@ -443,8 +503,8 @@ export function ExportDialog({
                   className="text-primary hover:underline"
                 >
                   Open SKILL.md
-                </a>
-                {" "}(includes the same MCP URL + bounded remote/local handoff)
+                </a>{" "}
+                (includes the same MCP URL + bounded remote/local handoff)
               </motion.p>
             )}
 

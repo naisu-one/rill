@@ -61,6 +61,9 @@ export function stableHash(input: string): string {
  * `buildFlowGraph` returns). Same graph content, in any key order, always
  * hashes identically.
  */
-export function hashFlowGraph(graph: { nodes: unknown[]; edges: unknown[] }): string {
-  return stableHash(stableStringify({ nodes: graph.nodes, edges: graph.edges }));
+export function hashFlowGraph(
+  graph: { nodes: unknown[]; edges: unknown[] },
+  publication?: { apiBase: string; owner?: string; manifest: unknown },
+): string {
+  return stableHash(stableStringify({ nodes: graph.nodes, edges: graph.edges, publication }));
 }

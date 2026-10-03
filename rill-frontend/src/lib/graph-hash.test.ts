@@ -21,6 +21,25 @@ describe("hashFlowGraph", () => {
     edges: [{ source: "n1", target: "n2" }],
   };
 
+  it("invalidates published links when the backend, wallet, or capability rules change", () => {
+    const context = {
+      apiBase: "http://localhost:3939/api",
+      owner: "0x1",
+      manifest: { walletCoinType: "0x2::sui::SUI", rules: [{ kind: "budget", totalMist: "100" }] },
+    };
+    const original = hashFlowGraph(graph, context);
+    expect(hashFlowGraph(graph, { ...context, owner: "0x2" })).not.toBe(original);
+    expect(hashFlowGraph(graph, { ...context, apiBase: "https://example.com/api" })).not.toBe(
+      original,
+    );
+    expect(
+      hashFlowGraph(graph, {
+        ...context,
+        manifest: { ...context.manifest, rules: [{ kind: "budget", totalMist: "50" }] },
+      }),
+    ).not.toBe(original);
+  });
+
   it("is stable across differing key order within node/edge objects", () => {
     const reorderedKeys = {
       nodes: [{ id: "n1", config: { pool: "p1", amount_in: "100" }, type: "cetus_swap" }],

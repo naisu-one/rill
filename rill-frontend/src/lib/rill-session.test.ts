@@ -1,12 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearSession, ensureSession, loadSession, saveSession, type RillSession } from "./rill-session";
+import {
+  clearSession,
+  ensureSession,
+  loadSession,
+  saveSession,
+  SESSION_STORAGE_KEY,
+  type RillSession,
+} from "./rill-session";
 import { rillApi } from "./rill-api";
 
 const ADDRESS = `0x${"a".repeat(64)}`;
 const OTHER = `0x${"b".repeat(64)}`;
 
 function session(overrides: Partial<RillSession> = {}): RillSession {
-  return { accessToken: "token-1", address: ADDRESS, expiresAtMs: Date.now() + 3_600_000, ...overrides };
+  return {
+    accessToken: "token-1",
+    address: ADDRESS,
+    expiresAtMs: Date.now() + 3_600_000,
+    ...overrides,
+  };
 }
 
 /** Stands in for the wallet. Records how often it was asked to sign. */
@@ -38,10 +50,10 @@ describe("session storage", () => {
   });
 
   it("treats corrupt or partial stored data as signed out rather than throwing", () => {
-    sessionStorage.setItem("rill.session.v1", "{not json");
+    sessionStorage.setItem(SESSION_STORAGE_KEY, "{not json");
     expect(loadSession()).toBeNull();
 
-    sessionStorage.setItem("rill.session.v1", JSON.stringify({ accessToken: "x" }));
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ accessToken: "x" }));
     expect(loadSession()).toBeNull();
   });
 });
@@ -64,10 +76,14 @@ describe("ensureSession", () => {
     saveSession(session({ address: OTHER }));
     const w = wallet();
     vi.spyOn(rillApi, "walletChallenge").mockResolvedValue({
-      challengeId: "sreq_1", message: "sign me", expiresAt: new Date().toISOString(),
+      challengeId: "sreq_1",
+      message: "sign me",
+      expiresAt: new Date().toISOString(),
     });
     vi.spyOn(rillApi, "walletToken").mockResolvedValue({
-      access_token: "token-2", expires_in: 3600, address: ADDRESS,
+      access_token: "token-2",
+      expires_in: 3600,
+      address: ADDRESS,
     });
 
     const result = await ensureSession(ADDRESS, w.sign);
@@ -82,10 +98,14 @@ describe("ensureSession", () => {
     saveSession(session({ expiresAtMs: Date.now() + 5_000 }));
     const w = wallet();
     vi.spyOn(rillApi, "walletChallenge").mockResolvedValue({
-      challengeId: "sreq_1", message: "sign me", expiresAt: new Date().toISOString(),
+      challengeId: "sreq_1",
+      message: "sign me",
+      expiresAt: new Date().toISOString(),
     });
     vi.spyOn(rillApi, "walletToken").mockResolvedValue({
-      access_token: "token-3", expires_in: 3600, address: ADDRESS,
+      access_token: "token-3",
+      expires_in: 3600,
+      address: ADDRESS,
     });
 
     await ensureSession(ADDRESS, w.sign);
@@ -95,10 +115,14 @@ describe("ensureSession", () => {
   it("signs the backend's message bytes verbatim", async () => {
     const w = wallet();
     vi.spyOn(rillApi, "walletChallenge").mockResolvedValue({
-      challengeId: "sreq_1", message: "line one\nline two", expiresAt: new Date().toISOString(),
+      challengeId: "sreq_1",
+      message: "line one\nline two",
+      expiresAt: new Date().toISOString(),
     });
     vi.spyOn(rillApi, "walletToken").mockResolvedValue({
-      access_token: "token-4", expires_in: 3600, address: ADDRESS,
+      access_token: "token-4",
+      expires_in: 3600,
+      address: ADDRESS,
     });
 
     await ensureSession(ADDRESS, w.sign);
@@ -109,10 +133,14 @@ describe("ensureSession", () => {
   it("refuses a token whose address differs from the connected account", async () => {
     const w = wallet();
     vi.spyOn(rillApi, "walletChallenge").mockResolvedValue({
-      challengeId: "sreq_1", message: "sign me", expiresAt: new Date().toISOString(),
+      challengeId: "sreq_1",
+      message: "sign me",
+      expiresAt: new Date().toISOString(),
     });
     vi.spyOn(rillApi, "walletToken").mockResolvedValue({
-      access_token: "token-5", expires_in: 3600, address: OTHER,
+      access_token: "token-5",
+      expires_in: 3600,
+      address: OTHER,
     });
 
     await expect(ensureSession(ADDRESS, w.sign)).rejects.toThrow(/different address/);

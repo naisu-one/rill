@@ -21,7 +21,7 @@ export const TESTNET_MANIFEST = {
     stakingObjectId: "0xb399662ac5d3973256a1e8629a913336449a2baa16847502ce6bdbf4a0003f07",
     minStakeMist: "1000000000",
   },
-} as const;
+};
 
 export const SWAP_TOKENS = [
   { symbol: "SUI", coinType: "0x2::sui::SUI" },
@@ -67,6 +67,8 @@ export function defaultActionConfig(protocolId: string, actionId: string): Actio
     return {
       poolKey: "SUI_DBUSDC",
       balanceManagerId: "",
+      tradeCapId: "",
+      depositCapId: "",
       depositSui: "1.1",
       price: "1",
       quantity: "1",
@@ -211,6 +213,8 @@ export function buildDeepbookOrderFlowConfig(cfg: ActionConfig) {
   return {
     poolKey: cfg.poolKey || "SUI_DBUSDC",
     balanceManagerId: cfg.balanceManagerId || "",
+    tradeCapId: cfg.tradeCapId || "",
+    depositCapId: cfg.depositCapId || "",
     depositSui: cfg.depositSui || "0",
     price: cfg.price || "1",
     quantity: cfg.quantity || "1",

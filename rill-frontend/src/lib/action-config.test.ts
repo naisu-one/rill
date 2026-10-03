@@ -3,6 +3,7 @@ import {
   actionAmountError,
   buildCetusSwapFlowConfig,
   buildHaedalStakeFlowConfig,
+  buildDeepbookOrderFlowConfig,
   DEFAULT_MIN_SWAP_OUTPUT,
   defaultActionConfig,
   isValidActionAmount,
@@ -12,6 +13,25 @@ import {
 
 const USDC = TOKEN_COIN_TYPE.USDC; // Cetus testnet USDC — 6 decimals in the SDK token registry.
 const SUI = TOKEN_COIN_TYPE.SUI; // 9 decimals.
+
+describe("DeepBook delegated capabilities", () => {
+  it("preserves the separate trade and deposit caps when compiling an order", () => {
+    const config = buildDeepbookOrderFlowConfig({
+      balanceManagerId: "0x1",
+      tradeCapId: "0x2",
+      depositCapId: "0x3",
+      price: "9007199254740993.01",
+      quantity: "0.000000001",
+    });
+    expect(config).toMatchObject({
+      balanceManagerId: "0x1",
+      tradeCapId: "0x2",
+      depositCapId: "0x3",
+      price: "9007199254740993.01",
+      quantity: "0.000000001",
+    });
+  });
+});
 
 describe("decimal -> base-units conversion, using each coin's real decimals (R5 headline fix)", () => {
   it("Cetus swap's fixed 0.1 preview amount converts in the input token's own decimals", () => {

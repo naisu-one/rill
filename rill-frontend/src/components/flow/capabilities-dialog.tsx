@@ -27,9 +27,8 @@ import {
  * Wallet-level capability composer (U7): compose a `CapabilityManifest` rule-by-rule and see an
  * honest live preview of what the SDK's `toDeclaration` projection would actually tell the agent —
  * each cap labeled `on-chain` (proved against the real PTB, cannot be bypassed) or `pre-flight`
- * (enforced by the trusted compiler + signer instead). This dialog only composes + previews the
- * manifest; wiring it into the compile/publish payload is a later phase (builder.tsx does not send
- * `manifest` anywhere yet).
+ * (enforced by the trusted compiler + signer instead). The builder publishes this manifest with
+ * the flow so onboarding installs the same capabilities the owner reviewed here.
  */
 
 const RATE_LIMIT_WINDOW_PRESETS: { label: string; ms: string }[] = [

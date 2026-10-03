@@ -156,13 +156,14 @@ function Builder() {
   const [templateOpen, setTemplateOpen] = useState(false);
   const [simulateOpen, setSimulateOpen] = useState(false);
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
-  // Wallet-level CapabilityManifest (U7) — composed in the Capabilities dialog, persisted
-  // alongside nodes/edges below. Deliberately NOT wired into /simulate or /publish yet (next
-  // phase); this phase is compose + honest live preview + persist only.
+  // Wallet capabilities are persisted with the draft and published for Rust onboarding.
   const [manifest, setManifest] = useState<CapabilityManifest>(() => emptyManifest());
   // Part C: sidebar collapse/width are pure UI state — not persisted to the draft (component
   // state is enough; nothing about a canvas's meaning depends on how wide the library panel was).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  useEffect(() => {
+    if (window.matchMedia("(max-width: 639px)").matches) setSidebarCollapsed(true);
+  }, []);
   const [sidebarWidth, setSidebarWidth] = useState(320);
   const idRef = useRef(1);
   const { screenToFlowPosition, fitView } = useReactFlow();
@@ -205,7 +206,7 @@ function Builder() {
     } else if (result.status === "corrupt") {
       toast.error("Previous draft couldn't be restored");
     }
-  }, []);
+  }, [setEdges, setNodes]);
 
   // Debounced autosave (R16): waits for a ~800ms pause in canvas activity
   // (drags, wiring, node adds, capability-manifest edits) before persisting,
@@ -547,9 +548,7 @@ function Builder() {
     // sit off-screen or half-cut (the "not centered / can't see everything" complaint). Fit the
     // viewport to the new positions once React Flow has committed them (rAF → next paint) and cap
     // the zoom so a 1- or 2-node flow frames at a sane size instead of blowing up to max zoom.
-    requestAnimationFrame(() =>
-      fitView({ padding: 0.2, duration: 400, maxZoom: 1, minZoom: 0.4 }),
-    );
+    requestAnimationFrame(() => fitView({ padding: 0.2, duration: 400, maxZoom: 1, minZoom: 0.4 }));
   }, [setNodes, fitView]);
 
   // Part C: hand-rolled drag-resize (not react-resizable-panels — that library sizes panels by
@@ -838,16 +837,15 @@ function Builder() {
                   onConnectStart={onConnectStart}
                   onConnectEnd={onConnectEnd}
                   isValidConnection={isValidConnection}
-                  nodeTypes={nodeTypes as any}
-                  edgeTypes={edgeTypes as any}
+                  nodeTypes={nodeTypes}
+                  edgeTypes={edgeTypes}
                   fitView
                   fitViewOptions={{ padding: 0.2, maxZoom: 1, minZoom: 0.4 }}
                   minZoom={0.3}
                   maxZoom={1.5}
                   className="h-full w-full"
                   proOptions={{ hideAttribution: true }}
-                  defaultEdgeOptions={{ type: "deletable", animated: true }}
-                  edgesDeletable
+                  defaultEdgeOptions={{ type: "deletable", animated: true, deletable: true }}
                   deleteKeyCode={["Backspace", "Delete"]}
                   connectionRadius={28}
                   connectionLineStyle={{ stroke: "var(--color-primary)", strokeWidth: 2 }}
@@ -895,6 +893,7 @@ function Builder() {
           <ExportDialog
             nodes={nodes}
             edges={edges}
+            manifest={manifest}
             open
             onOpenChange={(o) => !o && setExportOpen(false)}
           />
@@ -982,7 +981,7 @@ function ProtocolGroup({
                   transition={{ delay: i * 0.04, duration: 0.25, ease: easeOut }}
                   whileHover={{ x: 4, backgroundColor: "var(--color-secondary)" }}
                   draggable
-                  onDragStart={(e) => onDragStart(e, p, a.id)}
+                  onDragStartCapture={(e) => onDragStart(e, p, a.id)}
                   onDoubleClick={() => onAdd(p, a.id)}
                   className="group flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 cursor-grab active:cursor-grabbing"
                 >

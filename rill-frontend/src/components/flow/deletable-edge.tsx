@@ -19,7 +19,6 @@ function DeletableEdgeImpl({
   selected,
   markerEnd,
   style,
-  className,
 }: EdgeProps) {
   const { setEdges } = useReactFlow();
   const [hovered, setHovered] = useState(false);

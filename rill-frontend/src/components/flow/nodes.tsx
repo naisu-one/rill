@@ -213,6 +213,28 @@ function ActionNodeImpl({ id, data, selected }: NodeProps<ActionNodeData>) {
                 onChange={(e) => patchConfig({ balanceManagerId: e.target.value })}
               />
             </label>
+            <label className="block">
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                TradeCap
+              </span>
+              <input
+                className={fieldCls}
+                placeholder="0x…"
+                value={cfg.tradeCapId ?? ""}
+                onChange={(e) => patchConfig({ tradeCapId: e.target.value })}
+              />
+            </label>
+            <label className="block">
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                DepositCap
+              </span>
+              <input
+                className={fieldCls}
+                placeholder="0x…"
+                value={cfg.depositCapId ?? ""}
+                onChange={(e) => patchConfig({ depositCapId: e.target.value })}
+              />
+            </label>
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
                 <span className="text-[10px] text-muted-foreground uppercase tracking-wide">

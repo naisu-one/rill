@@ -15,7 +15,9 @@ import { SuiClientProvider, WalletProvider } from "@mysten/dapp-kit";
 import { Toaster } from "@/components/ui/sonner";
 import "@mysten/dapp-kit/dist/index.css";
 
-const SUI_NETWORKS = { testnet: { url: "https://fullnode.testnet.sui.io:443" } };
+const SUI_NETWORKS = {
+  testnet: { url: "https://fullnode.testnet.sui.io:443", network: "testnet" as const },
+};
 
 function NotFoundComponent() {
   return (
@@ -83,13 +85,25 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Rill — Make any Sui dApp agent-ready" },
-      { name: "description", content: "Compose flows visually and export MCPs, skills, or CLI tools that let AI agents act on any Sui protocol." },
+      {
+        name: "description",
+        content:
+          "Compose flows visually and export MCPs, skills, or CLI tools that let AI agents act on any Sui protocol.",
+      },
       { property: "og:title", content: "Rill — Make any Sui dApp agent-ready" },
-      { property: "og:description", content: "Compose flows visually and export MCPs, skills, or CLI tools that let AI agents act on any Sui protocol." },
+      {
+        property: "og:description",
+        content:
+          "Compose flows visually and export MCPs, skills, or CLI tools that let AI agents act on any Sui protocol.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:title", content: "Rill — Make any Sui dApp agent-ready" },
-      { name: "twitter:description", content: "Compose flows visually and export MCPs, skills, or CLI tools that let AI agents act on any Sui protocol." },
+      {
+        name: "twitter:description",
+        content:
+          "Compose flows visually and export MCPs, skills, or CLI tools that let AI agents act on any Sui protocol.",
+      },
       // No hosted social-preview image exists for this deploy (the previous value was a
       // stale Lovable sandbox preview URL) — omitted rather than pointing at another
       // placeholder; add og:image/twitter:image back once a real asset is hosted.
