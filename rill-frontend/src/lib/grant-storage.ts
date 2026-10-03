@@ -22,6 +22,14 @@ export type Granted = {
   runSet: Record<string, unknown>;
   buildArguments: Record<string, unknown>;
   digest: string;
+  /** What the owner set during onboarding, reused to prepare the action grant. Absent on state
+   *  saved before grants existed, where the run set's own values are used instead. */
+  actionId?: string;
+  budgetMist?: string;
+  perTxMist?: string;
+  expiresAtMs?: string;
+  /** The revision of the owner-signed grant the agent can now run, once stored. */
+  grantRevision?: number;
 };
 
 export type GrantState = { pending: PendingSetup | null; granted: Granted | null };

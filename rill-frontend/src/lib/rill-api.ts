@@ -80,6 +80,31 @@ export type PublishedSkillSummary = {
   createdAt: string;
 };
 
+/**
+ * An owner-signed action grant as the Rust server prepares it: the run set an agent's local signer
+ * may execute one action under. Kept opaque: the wallet signs the server's `message` byte-for-byte,
+ * and the agent's signer recomputes that message from this grant and checks the signature against
+ * the wallet's on-chain owner, so a server that showed one thing and stored another is refused there.
+ */
+export type ActionGrant = Record<string, unknown> & {
+  actionId: string;
+  actionName: string;
+  agent: string;
+  walletId: string;
+  revision: number;
+  expiresAtMs: string;
+};
+
+export type PreparedGrant = { grant: ActionGrant; message: string };
+
+export type GrantInput = {
+  actionId: string;
+  walletId: string;
+  budgetMist: string;
+  perTxMist: string;
+  expiresAtMs?: string;
+};
+
 /** Empty-wallet creation plan. Rules and funding follow through /setup/attach. */
 export type SetupPlan = {
   setupPtb: string;
@@ -363,6 +388,41 @@ export const rillApi = {
    */
   prepareSetup(input: SetupInput, signal?: AbortSignal, accessToken?: string) {
     return post<SetupPlan>("/setup/prepare", input, signal, accessToken);
+  },
+
+  /** The grant for running `actionId` from an already funded wallet, and the exact text to sign. */
+  prepareGrant(input: GrantInput, signal?: AbortSignal, accessToken?: string) {
+    return post<PreparedGrant>("/grants/prepare", input, signal, accessToken);
+  },
+
+  /** Store a grant the wallet's owner signed. The server verifies the signature before storing. */
+  storeGrant(
+    signed: { grant: ActionGrant; signature: string },
+    signal?: AbortSignal,
+    accessToken?: string,
+  ) {
+    return post<{ stored: boolean; revision: number; actionId: string; agent: string }>(
+      "/grants",
+      signed,
+      signal,
+      accessToken,
+    );
+  },
+
+  /** Every grant held for one agent address. Public: ids and signatures, nothing secret. */
+  async grantsFor(agent: string, signal?: AbortSignal) {
+    const res = await fetch(`${API_BASE}/grants/${encodeURIComponent(agent)}`, {
+      signal: composeSignal(signal),
+    });
+    const json = await parseJsonResponse<{
+      success: boolean;
+      data?: { grants: { grant: ActionGrant; signature: string }[] };
+      error?: string;
+    }>(res);
+    if (!res.ok || !json.success || !json.data) {
+      throw new Error(json.error ?? `API error ${res.status}`);
+    }
+    return json.data.grants;
   },
 
   attachSetup(input: AttachSetupInput, signal?: AbortSignal, accessToken?: string) {

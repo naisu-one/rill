@@ -27,6 +27,8 @@ import {
 } from "@/lib/agent-wallet-tx";
 import {
   rillApi,
+  type GrantInput,
+  type PreparedGrant,
   type PublishedSkillSummary,
   type SetupPlan,
   type SetupInput,
@@ -42,7 +44,9 @@ import { ensureSession } from "@/lib/rill-session";
  * signer's self-onboarding path does. Here the OWNER is your browser wallet and the AGENT is the
  * local `rill-wallet` key, so the kill switch genuinely lives somewhere the agent cannot reach.
  *
- * Two signatures: create an empty wallet, then attach capabilities and fund atomically.
+ * Three signatures: create an empty wallet, attach capabilities and fund atomically, then sign the
+ * action grant the agent's local signer runs under. The grant replaces copying a run-set file by
+ * hand: the signer fetches it and uses it only after checking the owner's signature on chain.
  */
 export const Route = createFileRoute("/agent-wallet")({
   head: () => ({
@@ -82,6 +86,8 @@ function AgentWalletPage() {
   const [pending, setPending] = useState<PendingSetup | null>(null);
   const [granted, setGranted] = useState<Granted | null>(null);
   const [restoredOwner, setRestoredOwner] = useState<string | null>(null);
+  const [prepared, setPrepared] = useState<PreparedGrant | null>(null);
+  const [existingWallet, setExistingWallet] = useState("");
   useEffect(() => {
     const recovered = ownerAddress
       ? loadGrantState(rillApi.baseUrl, ownerAddress)
@@ -265,11 +271,111 @@ function AgentWalletPage() {
         runSet: attachment.runSet,
         buildArguments: attachment.buildArguments,
         digest: attachment.digest,
+        actionId: pending.input.skillId,
+        budgetMist: pending.input.budgetMist,
+        perTxMist: pending.input.perTxMist,
+        expiresAtMs: pending.input.expiresAtMs,
       });
       setPending(null);
-      toast.success("Wallet configured and funded");
+      toast.success("Wallet configured and funded", {
+        description: "One more signature grants the action to your agent.",
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Configuring the wallet failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** The grant request for the wallet onboarded on this page, from what the owner entered then. */
+  function grantInputForGranted(): GrantInput | null {
+    if (!granted) return null;
+    const runSet = granted.runSet as {
+      actionId?: string;
+      maxAmountBaseUnits?: string;
+      capabilityManifest?: { rules?: { kind?: string; totalMist?: string }[] };
+    };
+    const budget =
+      granted.budgetMist ??
+      runSet.capabilityManifest?.rules?.find((rule) => rule.kind === "budget")?.totalMist;
+    const perTx = granted.perTxMist ?? runSet.maxAmountBaseUnits;
+    const actionId = granted.actionId ?? runSet.actionId;
+    if (!budget || !perTx || !actionId) return null;
+    return {
+      actionId,
+      walletId: granted.walletId,
+      budgetMist: budget,
+      perTxMist: perTx,
+      expiresAtMs: granted.expiresAtMs,
+    };
+  }
+
+  /** The grant request for a wallet funded elsewhere, from this form's action and limits. */
+  function grantInputForExisting(): GrantInput | null {
+    const budgetMist = suiToMist(budgetSui);
+    const perTxMist = suiToMist(perTxSui);
+    const hours = Number(expiryHours);
+    if (!/^0x[0-9a-fA-F]{64}$/.test(existingWallet.trim())) {
+      toast.error("Wallet id must be a full Sui object id.");
+      return null;
+    }
+    if (!skillId || budgetMist === null || perTxMist === null || !Number.isFinite(hours)) {
+      toast.error("Choose an action and set the budget, per-tx max and expiry above.");
+      return null;
+    }
+    return {
+      actionId: skillId,
+      walletId: existingWallet.trim(),
+      budgetMist: budgetMist.toString(),
+      perTxMist: perTxMist.toString(),
+      expiresAtMs: String(Date.now() + hours * 60 * 60 * 1000),
+    };
+  }
+
+  /** Ask the server for the grant and the exact text to sign. Nothing is signed here. */
+  async function prepareActionGrant(input: GrantInput | null) {
+    if (!account || !input || busy) return;
+    setBusy("Preparing the grant…");
+    try {
+      const session = await ensureSession(account.address, async (message) => {
+        const { signature } = await signPersonalMessage({ message });
+        return signature;
+      });
+      setPrepared(await rillApi.prepareGrant(input, undefined, session.accessToken));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Preparing the grant failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Sign the prepared grant's message verbatim and store it for the agent's signer. */
+  async function signActionGrant() {
+    if (!account || !prepared || busy) return;
+    setBusy("Waiting for your wallet…");
+    try {
+      const { signature } = await signPersonalMessage({
+        message: new TextEncoder().encode(prepared.message),
+      });
+      const session = await ensureSession(account.address, async (message) => {
+        const { signature } = await signPersonalMessage({ message });
+        return signature;
+      });
+      setBusy("Storing the grant…");
+      const stored = await rillApi.storeGrant(
+        { grant: prepared.grant, signature },
+        undefined,
+        session.accessToken,
+      );
+      if (granted && granted.walletId === prepared.grant.walletId) {
+        setGranted({ ...granted, grantRevision: stored.revision });
+      }
+      toast.success(`Granted to your agent (revision ${stored.revision})`, {
+        description: "Ask your agent to list its Rill actions; it can run this one now.",
+      });
+      setPrepared(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Signing the grant failed.");
     } finally {
       setBusy(null);
     }
@@ -328,9 +434,10 @@ function AgentWalletPage() {
         <div className="text-xs uppercase tracking-widest text-muted-foreground">Agent wallet</div>
         <h1 className="mt-2 font-display text-4xl tracking-tight">Grant a bounded budget</h1>
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-          First create an empty wallet, then attach its capabilities and fund it in one transaction.
-          After both signatures, your agent can spend within the granted limits. You keep the
-          ability to revoke the wallet and reclaim its remaining budget.
+          First create an empty wallet, then attach its capabilities and fund it in one transaction,
+          then sign a grant for the action. After that your agent can run the action within the
+          granted limits. You keep the ability to revoke the wallet and reclaim its remaining
+          budget.
         </p>
 
         {!account ? (
@@ -396,8 +503,8 @@ function AgentWalletPage() {
                 className="mt-1.5"
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
-                For DeepBook actions, provide the exact decimal order price when the order
-                book has no live mid price. Swap and stake actions do not need this field.
+                For DeepBook actions, provide the exact decimal order price when the order book has
+                no live mid price. Swap and stake actions do not need this field.
               </p>
             </div>
 
@@ -431,6 +538,32 @@ function AgentWalletPage() {
               </div>
             </div>
 
+            {prepared && (
+              <div className="space-y-3 rounded-xl border border-primary/40 p-4">
+                <div className="text-sm font-medium">Review the grant before signing</div>
+                <p className="text-xs text-muted-foreground">
+                  Your wallet signs exactly this text. Your agent's signer re-derives it from the
+                  grant and checks your signature on chain, so nothing different can be run under
+                  it.
+                </p>
+                <pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs">
+                  {prepared.message}
+                </pre>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={signActionGrant} disabled={Boolean(busy)}>
+                    {busy ?? "Sign grant"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setPrepared(null)}
+                    disabled={Boolean(busy)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {pending ? (
               <div className="space-y-3 rounded-xl border border-border p-4">
                 <div className="text-sm font-medium">
@@ -458,9 +591,36 @@ function AgentWalletPage() {
                 </Button>
               </div>
             ) : !granted ? (
-              <Button onClick={grant} disabled={Boolean(busy) || !skillId || !agent}>
-                {busy ?? "Create empty wallet"}
-              </Button>
+              <div className="space-y-4">
+                <Button onClick={grant} disabled={Boolean(busy) || !skillId || !agent}>
+                  {busy ?? "Create empty wallet"}
+                </Button>
+                <details className="rounded-xl border border-border p-4 text-sm">
+                  <summary className="cursor-pointer font-medium">
+                    Already funded a wallet? Grant this action to it
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    <Label htmlFor="existing-wallet">Wallet id</Label>
+                    <Input
+                      id="existing-wallet"
+                      value={existingWallet}
+                      onChange={(event) => setExistingWallet(event.target.value)}
+                      placeholder="0x… — a wallet you own, already carrying its rules"
+                      className="font-mono text-xs"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Uses the action, limits and expiry above. The agent is read from the wallet.
+                    </p>
+                    <Button
+                      variant="outline"
+                      onClick={() => prepareActionGrant(grantInputForExisting())}
+                      disabled={Boolean(busy) || !skillId || !existingWallet}
+                    >
+                      Prepare grant
+                    </Button>
+                  </div>
+                </details>
+              </div>
             ) : (
               <div className="space-y-4 rounded-xl border border-border p-4">
                 <div className="text-sm font-medium">Granted</div>
@@ -488,8 +648,31 @@ function AgentWalletPage() {
                     </>
                   )}
                 </dl>
+                {granted.grantRevision ? (
+                  <p className="text-sm text-emerald-600 dark:text-emerald-500">
+                    Granted to your agent (revision {granted.grantRevision}). Ask it to list its
+                    Rill actions and run this one.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Last step: sign a grant so your agent's signer can run this action. It only
+                      ever signs what this grant allows.
+                    </p>
+                    <Button
+                      onClick={() => prepareActionGrant(grantInputForGranted())}
+                      disabled={
+                        Boolean(busy) || Boolean(prepared) || account.address !== granted.owner
+                      }
+                    >
+                      Grant this action to the agent
+                    </Button>
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => downloadArtifact("runSet")}>Download run set</Button>
+                  <Button variant="outline" onClick={() => downloadArtifact("runSet")}>
+                    Download run set (advanced)
+                  </Button>
                   <Button variant="outline" onClick={() => downloadArtifact("buildArguments")}>
                     Download build arguments
                   </Button>
