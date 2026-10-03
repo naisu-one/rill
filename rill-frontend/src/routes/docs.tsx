@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SiteHeader, SiteFooter } from "@/components/site-chrome";
+import { SUI_NETWORK } from "@/lib/sui-network";
 
 export const Route = createFileRoute("/docs")({
   head: () => ({
@@ -34,7 +35,7 @@ function DocsPage() {
           <h2 className="font-display text-2xl mt-10">2 · Configure</h2>
           <p className="text-muted-foreground">
             Each action has typed inputs. Pin static values, or expose them so the agent decides. Rill handles validation and
-            transaction construction for Sui testnet automatically.
+            transaction construction for Sui {SUI_NETWORK} automatically.
           </p>
 
           <h2 className="font-display text-2xl mt-10">3 · Export</h2>
@@ -45,8 +46,9 @@ function DocsPage() {
 
           <h2 className="font-display text-2xl mt-10">Runtime</h2>
           <p className="text-muted-foreground">
-            Rill speaks the Sui TypeScript SDK under the hood and uses the standard Sui wallet kit for signing. Testnet is enabled by
-            default; mainnet ships post-hackathon.
+            Studio is configured for Sui {SUI_NETWORK} and uses the standard Sui wallet kit for signing.
+            The backend must use the same network. Mainnet requires a complete backend protocol registry
+            and explicitly configured Rill contract deployment.
           </p>
         </div>
       </section>

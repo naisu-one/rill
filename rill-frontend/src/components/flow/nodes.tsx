@@ -198,7 +198,7 @@ function ActionNodeImpl({ id, data, selected }: NodeProps<ActionNodeData>) {
               </span>
               <input
                 className={fieldCls}
-                value={cfg.poolKey ?? "SUI_DBUSDC"}
+                value={cfg.poolKey ?? defaultActionConfig("deepbook", "limit_order").poolKey}
                 onChange={(e) => patchConfig({ poolKey: e.target.value })}
               />
             </label>

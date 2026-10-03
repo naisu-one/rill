@@ -1,4 +1,5 @@
 import type { Edge, Node } from "reactflow";
+import { SUI_NETWORK } from "./sui-network";
 import type { PublishResult } from "@/lib/rill-api";
 import { emptyManifest, type CapabilityManifest } from "@/lib/capabilities";
 
@@ -14,8 +15,9 @@ import { emptyManifest, type CapabilityManifest } from "@/lib/capabilities";
 /** Namespaced + versioned so a future incompatible schema change never
  *  collides with (or gets misread as) whatever a returning user already has
  *  saved under an older shape. */
-export const DRAFT_STORAGE_KEY = "rill.builder.draft.v1";
-export const PUBLISH_STORAGE_KEY = "rill.builder.publish.v1";
+const networkSuffix = SUI_NETWORK === "testnet" ? "" : `:${SUI_NETWORK}`;
+export const DRAFT_STORAGE_KEY = `rill.builder.draft.v1${networkSuffix}`;
+export const PUBLISH_STORAGE_KEY = `rill.builder.publish.v1${networkSuffix}`;
 
 const DRAFT_SCHEMA_VERSION = 1;
 

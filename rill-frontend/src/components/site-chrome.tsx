@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { ArrowRight } from "lucide-react";
 import { ConnectButton } from "@mysten/dapp-kit";
 import { RillMark } from "@/components/rill-mark";
+import { SUI_NETWORK } from "@/lib/sui-network";
 
 export function SiteHeader() {
   return (
@@ -19,7 +20,7 @@ export function SiteHeader() {
           </motion.span>
           <span className="font-display text-xl tracking-tight">Rill</span>
           <span className="ml-2 text-[10px] uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-            testnet
+            {SUI_NETWORK}
           </span>
         </Link>
         <nav className="flex items-center gap-1 text-sm">

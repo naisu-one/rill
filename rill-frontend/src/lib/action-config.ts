@@ -3,6 +3,8 @@
 // only resolve where a local dist/ happens to exist (it fails in a clean CI install); importing the
 // source directly always resolves and lets the bundler compile it.
 import { decimalToBaseUnits, findToken } from "../../../packages/rill-sdk/src";
+import { SUI_NETWORK } from "./sui-network";
+import { validateProtocolRegistry } from "./protocol-registry";
 
 /** Testnet protocol manifest — passed in full to backend on every compile/simulate. */
 
@@ -31,6 +33,13 @@ export const SWAP_TOKENS = [
   },
 ] as const;
 
+let activeManifest = SUI_NETWORK === "testnet" ? TESTNET_MANIFEST : null;
+
+function requireProtocolManifest() {
+  if (!activeManifest) throw new Error("Load a matching protocol registry before compiling mainnet flows.");
+  return activeManifest;
+}
+
 export type SwapTokenSymbol = (typeof SWAP_TOKENS)[number]["symbol"];
 
 export const TOKEN_LOGOS: Record<SwapTokenSymbol, string> = {
@@ -41,6 +50,7 @@ export const TOKEN_LOGOS: Record<SwapTokenSymbol, string> = {
 export const TOKEN_COIN_TYPE: Record<SwapTokenSymbol, string> = Object.fromEntries(
   SWAP_TOKENS.map((t) => [t.symbol, t.coinType]),
 ) as Record<SwapTokenSymbol, string>;
+if (SUI_NETWORK === "mainnet") TOKEN_COIN_TYPE.USDC = "";
 
 export type ActionConfig = Record<string, string>;
 
@@ -65,7 +75,7 @@ export function defaultActionConfig(protocolId: string, actionId: string): Actio
   }
   if (protocolId === "deepbook" && actionId === "limit_order") {
     return {
-      poolKey: "SUI_DBUSDC",
+      poolKey: SUI_NETWORK === "mainnet" ? "SUI_USDC" : "SUI_DBUSDC",
       balanceManagerId: "",
       tradeCapId: "",
       depositCapId: "",
@@ -158,7 +168,7 @@ export function otherSwapToken(symbol: SwapTokenSymbol): SwapTokenSymbol {
   return symbol === "SUI" ? "USDC" : "SUI";
 }
 
-/** Build backend flow node config — FE owns protocol addresses, BE compiles from this payload.
+/** Build backend flow node config from the matching backend protocol registry.
  *
  *  Part B: `amount_in` is a fixed studio-preview default, not `cfg.amount` — this is an
  *  agent-driven action node now (no Amount input on the canvas). Studio simulate always previews
@@ -175,7 +185,7 @@ export function otherSwapToken(symbol: SwapTokenSymbol): SwapTokenSymbol {
  *  field; every node built by `defaultActionConfig`/the template builders already seeds it. */
 export function buildCetusSwapFlowConfig(cfg: ActionConfig) {
   const tokenIn = (cfg.tokenIn as SwapTokenSymbol) || "SUI";
-  const m = TESTNET_MANIFEST.cetus_swap;
+  const m = requireProtocolManifest().cetus_swap;
   const inputCoinType = TOKEN_COIN_TYPE[tokenIn] ?? TOKEN_COIN_TYPE.SUI;
   const outputCoinType = TOKEN_COIN_TYPE[otherSwapToken(tokenIn)];
   return {
@@ -198,7 +208,7 @@ export function buildCetusSwapFlowConfig(cfg: ActionConfig) {
  *  `buildCetusSwapFlowConfig`'s doc comment above for why. `cfg` is kept in the signature for
  *  parity with the other `build*FlowConfig` functions even though this one no longer reads it. */
 export function buildHaedalStakeFlowConfig(_cfg: ActionConfig) {
-  const m = TESTNET_MANIFEST.haedal_stake;
+  const m = requireProtocolManifest().haedal_stake;
   return {
     stakeTarget: m.stakeTarget,
     suiSystemStateId: m.suiSystemStateId,
@@ -210,8 +220,9 @@ export function buildHaedalStakeFlowConfig(_cfg: ActionConfig) {
 
 /** Build backend config for a DeepBook limit order. BalanceManager must be funded (onboarding). */
 export function buildDeepbookOrderFlowConfig(cfg: ActionConfig) {
+  requireProtocolManifest();
   return {
-    poolKey: cfg.poolKey || "SUI_DBUSDC",
+    poolKey: cfg.poolKey || (SUI_NETWORK === "mainnet" ? "SUI_USDC" : "SUI_DBUSDC"),
     balanceManagerId: cfg.balanceManagerId || "",
     tradeCapId: cfg.tradeCapId || "",
     depositCapId: cfg.depositCapId || "",
@@ -224,17 +235,14 @@ export function buildDeepbookOrderFlowConfig(cfg: ActionConfig) {
   };
 }
 
-/** Merge server registry from GET /api/protocols (optional bootstrap). */
-export function applyProtocolRegistry(registry: {
-  cetus_swap?: Partial<(typeof TESTNET_MANIFEST)["cetus_swap"]> & { defaultPoolId?: string };
-  haedal_stake?: Partial<(typeof TESTNET_MANIFEST)["haedal_stake"]>;
-}) {
-  if (registry.cetus_swap) {
-    const { defaultPoolId, ...rest } = registry.cetus_swap;
-    Object.assign(TESTNET_MANIFEST.cetus_swap, rest);
-    if (defaultPoolId) TESTNET_MANIFEST.cetus_swap.defaultPoolId = defaultPoolId;
-  }
-  if (registry.haedal_stake) {
-    Object.assign(TESTNET_MANIFEST.haedal_stake, registry.haedal_stake);
+/** Install the complete registry atomically after confirming the backend network. */
+export function applyProtocolRegistry(value: unknown) {
+  const registry = validateProtocolRegistry(value);
+  activeManifest = {
+    cetus_swap: { ...registry.cetus_swap },
+    haedal_stake: { ...registry.haedal_stake },
+  };
+  for (const symbol of ["SUI", "USDC"] as const) {
+    TOKEN_COIN_TYPE[symbol] = registry.cetus_swap.tokens.find((token) => token.symbol === symbol)!.coinType;
   }
 }

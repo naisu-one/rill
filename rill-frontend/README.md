@@ -8,7 +8,11 @@ The TypeScript backend is not required.
 3. Run the workspace's frontend dev command and open the URL Vite prints.
 4. Set the Rust server's `RILL_STUDIO_URL` to that same frontend origin so wallet consent redirects return here.
 
-`VITE_RILL_API_URL` accepts either the server origin or its `/api` URL. Restart Vite after changing it. The default is `http://localhost:3939/api`; hosted environments must set their own URL at build time. The browser wallet provider uses Sui testnet.
+`VITE_RILL_API_URL` accepts either the server origin or its `/api` URL. Restart Vite after changing it. The default is `http://localhost:3939/api`; hosted environments must set their own URL at build time. `VITE_SUI_NETWORK` selects `testnet` (the default) or `mainnet` for the browser wallet provider and network labels. Any other value is rejected. Set it to the Rust server's `SUI_NETWORK` and restart Vite; hosted environments must set both frontend variables at build time.
+
+For mainnet, set `VITE_SUI_NETWORK=mainnet` and point `VITE_RILL_API_URL` at a backend configured for mainnet with explicitly deployed Rill contract IDs. Studio loads package IDs, pool IDs, and swap token types from that backend's complete `/api/protocols` registry. Missing fields or a different backend network block compilation and API transaction requests. Mainnet has no bundled Rill deployment or fallback protocol addresses. Its default DeepBook pool is `SUI_USDC`; testnet uses `SUI_DBUSDC`.
+
+Mainnet drafts, publish caches, wallet grants, and wallet sessions use separate browser storage keys, so a testnet grant or draft is not restored into mainnet. Existing testnet storage keys remain compatible.
 
 In the builder, configure an action and its wallet capabilities, simulate it, then publish. A connected wallet signs the server's personal-message challenge to associate the published action with its owner. Capability changes require publishing a new version.
 
@@ -20,6 +24,7 @@ Frontend checks use the installed binaries without invoking a package-manager bo
 
 ```sh
 ./node_modules/.bin/vitest run
+./node_modules/.bin/tsc --noEmit
 ./node_modules/.bin/vite build
 ```
 

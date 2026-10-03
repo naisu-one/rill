@@ -1,4 +1,5 @@
 import type { SetupInput, SetupPlan } from "./rill-api";
+import { SUI_NETWORK } from "./sui-network";
 export type PendingSetup = {
   input: SetupInput;
   plan: SetupPlan;
@@ -27,7 +28,8 @@ export type GrantState = { pending: PendingSetup | null; granted: Granted | null
 
 const empty = (): GrantState => ({ pending: null, granted: null });
 function key(base: string, owner: string): string {
-  return `rill:grant:v1:${encodeURIComponent(base)}:${owner.toLowerCase()}`;
+  const networkSuffix = SUI_NETWORK === "testnet" ? "" : `:${SUI_NETWORK}`;
+  return `rill:grant:v1:${encodeURIComponent(base)}:${owner.toLowerCase()}${networkSuffix}`;
 }
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

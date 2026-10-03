@@ -1,4 +1,5 @@
 import { rillApi } from "./rill-api";
+import { SUI_NETWORK } from "./sui-network";
 
 /**
  * The browser's Rill identity: a short-lived access token proving the connected wallet address.
@@ -13,7 +14,8 @@ import { rillApi } from "./rill-api";
  * prompt — so there is no reason to persist it further.
  */
 
-export const SESSION_STORAGE_KEY = `rill.session.v2:${rillApi.origin}`;
+const networkSuffix = SUI_NETWORK === "testnet" ? "" : `:${SUI_NETWORK}`;
+export const SESSION_STORAGE_KEY = `rill.session.v2:${rillApi.origin}${networkSuffix}`;
 /** Refresh a little before the real expiry so a publish can't be issued with a token that dies
  *  mid-flight. */
 const EXPIRY_SKEW_MS = 30_000;

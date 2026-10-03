@@ -396,7 +396,7 @@ function AgentWalletPage() {
                 className="mt-1.5"
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
-                For DeepBook actions, provide the exact decimal order price when the testnet order
+                For DeepBook actions, provide the exact decimal order price when the order
                 book has no live mid price. Swap and stake actions do not need this field.
               </p>
             </div>

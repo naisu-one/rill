@@ -13,11 +13,8 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SuiClientProvider, WalletProvider } from "@mysten/dapp-kit";
 import { Toaster } from "@/components/ui/sonner";
+import { SUI_NETWORK, SUI_NETWORKS } from "@/lib/sui-network";
 import "@mysten/dapp-kit/dist/index.css";
-
-const SUI_NETWORKS = {
-  testnet: { url: "https://fullnode.testnet.sui.io:443", network: "testnet" as const },
-};
 
 function NotFoundComponent() {
   return (
@@ -143,7 +140,7 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SuiClientProvider networks={SUI_NETWORKS} defaultNetwork="testnet">
+      <SuiClientProvider networks={SUI_NETWORKS} network={SUI_NETWORK}>
         <WalletProvider autoConnect>
           {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
           <Outlet />

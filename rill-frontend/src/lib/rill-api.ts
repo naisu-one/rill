@@ -1,4 +1,8 @@
 import type { CapabilityManifest } from "../../../packages/rill-sdk/src";
+import { validateProtocolRegistry, type ProtocolRegistry } from "./protocol-registry";
+import { assertBackendNetwork } from "./sui-network";
+
+export type { ProtocolRegistry } from "./protocol-registry";
 
 const API_FALLBACK = "http://localhost:3939/api";
 
@@ -111,27 +115,6 @@ export type AttachSetupInput = SetupInput & {
   depositCapId?: string;
 };
 
-export type ProtocolRegistry = {
-  network: string;
-  cetus_swap: {
-    integratePackageId: string;
-    globalConfigId: string;
-    defaultPoolId: string;
-    defaultInputCoinType: string;
-    tokens: { symbol: string; coinType: string }[];
-    minSqrtPrice: string;
-    maxSqrtPrice: string;
-  };
-  haedal_stake: {
-    packageId: string;
-    stakeTarget: string;
-    suiSystemStateId: string;
-    stakingObjectId: string;
-    minStakeMist: string;
-    coinType: string;
-  };
-};
-
 export type CapabilityPreviewResult = {
   onChainRules: { module: string; config: Record<string, unknown> }[];
   signerPolicy: Record<string, unknown>;
@@ -182,6 +165,7 @@ async function post<T>(
   signal?: AbortSignal,
   accessToken?: string,
 ): Promise<T> {
+  await rillApi.protocols(signal);
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: {
@@ -234,6 +218,7 @@ export const rillApi = {
         json.error_description ?? `Could not load this sign-in request (${res.status}).`,
       );
     }
+    assertBackendNetwork(json.data.network);
     return json.data;
   },
 
@@ -276,7 +261,7 @@ export const rillApi = {
     if (!res.ok || !json.success || !json.data) {
       throw new Error(json.error ?? `API error ${res.status}`);
     }
-    return json.data;
+    return validateProtocolRegistry(json.data);
   },
 
   introspect(packageId: string, signal?: AbortSignal) {

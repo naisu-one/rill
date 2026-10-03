@@ -5,6 +5,7 @@ import gsap from "gsap";
 import ReactFlow, { Background, BackgroundVariant } from "reactflow";
 import { ArrowRight, Workflow, Code2, Terminal, Boxes, Plug } from "lucide-react";
 import { SiteHeader, SiteFooter } from "@/components/site-chrome";
+import { SUI_NETWORK } from "@/lib/sui-network";
 import { ActionNode, TriggerNode, OutputNode } from "@/components/flow/nodes";
 
 export const Route = createFileRoute("/")({
@@ -220,7 +221,7 @@ function Landing() {
           <div className="absolute inset-0 -z-10 opacity-70" style={{ backgroundImage: "var(--gradient-aura)" }} />
           <h2 className="text-4xl md:text-5xl font-display tracking-tight">Wire your first flow.</h2>
           <p className="mt-3 text-muted-foreground max-w-xl mx-auto">
-            Live on Sui testnet. No wallet needed to design — connect when you're ready to ship.
+            Configured for Sui {SUI_NETWORK}. No wallet needed to design — connect when you're ready to ship.
           </p>
           <Link
             to="/builder"

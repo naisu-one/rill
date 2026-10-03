@@ -171,5 +171,5 @@ export const PROTOCOLS: Protocol[] = [
   },
 ];
 
-/** Protocols with live Rill backend compile support (testnet). */
+/** Protocols with live Rill backend compile support on the configured network. */
 export const BACKEND_PROTOCOL_IDS = new Set(["cetus", "haedal", "deepbook"]);

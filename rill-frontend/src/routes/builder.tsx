@@ -63,6 +63,7 @@ import { getActionPorts } from "@/lib/action-ports";
 import { FLOW_TEMPLATES, connectEdge } from "@/lib/flow-templates";
 import { computeAutoLayout } from "@/lib/auto-layout";
 import { rillApi } from "@/lib/rill-api";
+import { SUI_NETWORK } from "@/lib/sui-network";
 import { loadDraftFromStorage, saveDraftToStorage, maxNodeId } from "@/lib/draft-storage";
 import { emptyManifest, type CapabilityManifest } from "@/lib/capabilities";
 import { ManifestContext } from "@/lib/manifest-context";
@@ -156,6 +157,9 @@ function Builder() {
   const [templateOpen, setTemplateOpen] = useState(false);
   const [simulateOpen, setSimulateOpen] = useState(false);
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
+  const [registryReason, setRegistryReason] = useState<string | null>(
+    `Loading ${SUI_NETWORK} protocol registry before compiling.`,
+  );
   // Wallet capabilities are persisted with the draft and published for Rust onboarding.
   const [manifest, setManifest] = useState<CapabilityManifest>(() => emptyManifest());
   // Part C: sidebar collapse/width are pure UI state — not persisted to the draft (component
@@ -177,12 +181,21 @@ function Builder() {
   edgesRef.current = edges;
 
   useEffect(() => {
+    const controller = new AbortController();
     rillApi
-      .protocols()
-      .then(applyProtocolRegistry)
-      .catch(() => {
-        /* bundled TESTNET_MANIFEST is fallback */
+      .protocols(controller.signal)
+      .then((registry) => {
+        if (controller.signal.aborted) return;
+        applyProtocolRegistry(registry);
+        setRegistryReason(null);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        const reason = error instanceof Error ? error.message : "Could not load the protocol registry.";
+        setRegistryReason(reason);
+        toast.error(reason);
       });
+    return () => controller.abort();
   }, []);
 
   // Restore-on-mount (R16): a valid autosaved draft replaces the default
@@ -312,7 +325,12 @@ function Builder() {
     [nodes, edges],
   );
 
-  const publishGate = useMemo(() => computePublishGate(nodes, edges), [nodes, edges]);
+  const publishGate = useMemo(
+    () => registryReason
+      ? { publishable: false, reason: registryReason }
+      : computePublishGate(nodes, edges),
+    [nodes, edges, registryReason],
+  );
 
   // Applies applyWireConstraints' change list to real canvas state (setNodes) and
   // explains what changed and why — the compiled output was already self-correcting
@@ -339,9 +357,13 @@ function Builder() {
   }, [nodes, edges, setNodes]);
 
   const openSimulate = useCallback(() => {
+    if (registryReason) {
+      toast.error(registryReason);
+      return;
+    }
     applyWireCorrections();
     setSimulateOpen(true);
-  }, [applyWireCorrections]);
+  }, [applyWireCorrections, registryReason]);
 
   const openExport = useCallback(() => {
     if (!publishGate.publishable) {
