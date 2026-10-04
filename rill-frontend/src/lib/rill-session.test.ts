@@ -33,13 +33,23 @@ function wallet() {
   };
 }
 
+// An in-memory stand-in, like the other storage tests use for localStorage. Node 25 happens to ship
+// a global sessionStorage and CI's Node does not, so leaning on the runtime's passed on one
+// machine and failed four tests on the other.
 beforeEach(() => {
+  const values = new Map<string, string>();
+  vi.stubGlobal("sessionStorage", {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  });
   clearSession();
   vi.restoreAllMocks();
 });
 
 afterEach(() => {
   clearSession();
+  vi.unstubAllGlobals();
 });
 
 describe("session storage", () => {
