@@ -10,6 +10,7 @@ import { FlowWarningsBanner } from "@/components/flow/flow-warnings";
 import type { ActionNodeData } from "@/components/flow/nodes";
 import { buildFlowGraph } from "@/lib/flow-mapper";
 import { computePublishGate } from "@/lib/publish-gate";
+import { parentPublication } from "@/lib/publish-lineage";
 import { hashFlowGraph } from "@/lib/graph-hash";
 import { rillApi, type PublishResult } from "@/lib/rill-api";
 import { SUI_NETWORK } from "@/lib/sui-network";
@@ -117,7 +118,11 @@ export function ExportDialog({
   // The session token captured at click time, so the in-flight request always uses the token that
   // was proved for THIS publish rather than whatever lands in storage later.
   const sessionTokenRef = useRef<string | undefined>(undefined);
-  const publishPayloadRef = useRef({ flow: graph, manifest });
+  const publishPayloadRef = useRef<{
+    flow: typeof graph;
+    manifest: CapabilityManifest;
+    parentSkillId?: string;
+  }>({ flow: graph, manifest });
   const currentContextRef = useRef({ hash, open });
   currentContextRef.current = { hash, open };
   const [signingIn, setSigningIn] = useState(false);
@@ -134,6 +139,7 @@ export function ExportDialog({
       signal,
       sessionTokenRef.current,
       publishPayloadRef.current.manifest,
+      publishPayloadRef.current.parentSkillId,
     ),
   );
 
@@ -199,7 +205,10 @@ export function ExportDialog({
       toast.message("The flow or wallet changed. Review it before publishing again.");
       return;
     }
-    publishPayloadRef.current = snapshot;
+    publishPayloadRef.current = {
+      ...snapshot,
+      parentSkillId: parentPublication(storedRecord?.result, account?.address, rillApi.baseUrl),
+    };
     publishedForHashRef.current = snapshot.hash;
     doPublish();
   };
@@ -360,10 +369,11 @@ export function ExportDialog({
                 variants={fadeUp}
                 className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2.5 text-xs text-amber-800 dark:text-amber-300"
               >
-                <p className="font-medium">Unpublished — flow changed</p>
+                <p className="font-medium">Unpublished: flow changed</p>
                 <p className="mt-1">
-                  This flow was edited since it was last published. The previous MCP URL belongs to
-                  an earlier version:{" "}
+                  {parentPublication(staleRecord.result, account?.address, rillApi.baseUrl)
+                    ? "Publishing creates a new immutable version. Existing grants keep their previous workflow and require fresh approval for this version. Previous URL: "
+                    : "Publishing creates a separate skill. Previous URL: "}
                   <code className="break-all text-[10px] opacity-80">
                     {staleRecord.result.mcpUrl}
                   </code>
@@ -424,6 +434,22 @@ export function ExportDialog({
               </span>
             </motion.div>
 
+            <motion.div
+              variants={fadeUp}
+              className="rounded-lg border border-border/60 p-3 text-xs text-muted-foreground"
+            >
+              <p>
+                Version {published.version ?? 1} · <code>{published.skillId}</code>
+              </p>
+              {published.flowDigest && (
+                <p className="mt-1 break-all">
+                  Workflow digest: <code>{published.flowDigest}</code>
+                </p>
+              )}
+              <p className="mt-1">
+                Grants approve this exact version. Editing and publishing requires a new approval.
+              </p>
+            </motion.div>
             <motion.div
               variants={fadeUp}
               className="space-y-3 rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm"

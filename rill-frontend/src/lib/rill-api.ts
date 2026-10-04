@@ -48,6 +48,9 @@ export type SimulationResult = {
 };
 
 export type PublishResult = {
+  definitionId?: string;
+  version?: number;
+  flowDigest?: string;
   skillId: string;
   name: string;
   description: string;
@@ -72,6 +75,9 @@ export type PublishResult = {
 };
 
 export type PublishedSkillSummary = {
+  definitionId?: string;
+  version?: number;
+  flowDigest?: string;
   id: string;
   name: string;
   description: string;
@@ -111,6 +117,7 @@ export type GrantInput = {
 
 /** Empty-wallet creation plan. Rules and funding follow through /setup/attach. */
 export type SetupPlan = {
+  protection?: { adapterPackageId: string; revision: number; owner: string } | null;
   setupPtb: string;
   runSetTemplate: Record<string, unknown>;
   requiresTradeCap: boolean;
@@ -228,9 +235,56 @@ export type ConsentPrompt = {
   expiresAt: string;
 };
 
+export type PreparedPairing = { requestId: string; message: string; expiresAt: number };
+export type PairingChallenge = PreparedPairing & {
+  owner: string;
+  agent: string;
+  network: string;
+  domain: string;
+  nonce: string;
+  status: "pending" | "proved";
+};
+export type PairedAgent = { owner: string; agent: string; network: string; pairedAt: number };
+
 export const rillApi = {
   baseUrl: API_BASE,
   origin: API_ORIGIN,
+
+  preparePairing(agent: string, network: string, accessToken: string): Promise<PreparedPairing> {
+    return post("/pairing/prepare", { agent, network }, undefined, accessToken);
+  },
+  confirmPairing(requestId: string, accessToken: string): Promise<PairedAgent> {
+    return post("/pairing/confirm", { requestId }, undefined, accessToken);
+  },
+  async pairingChallenge(requestId: string): Promise<PairingChallenge> {
+    const response = await fetch(`${API_BASE}/pairing/${encodeURIComponent(requestId)}`, {
+      signal: composeSignal(),
+    });
+    const result = await parseJsonResponse<{
+      success: boolean;
+      data?: PairingChallenge;
+      error?: string;
+    }>(response);
+    if (!response.ok || !result.success || !result.data)
+      throw new Error(result.error ?? "Could not load pairing challenge.");
+    assertBackendNetwork(result.data.network);
+    return result.data;
+  },
+  async pairedAgents(accessToken: string): Promise<PairedAgent[]> {
+    await rillApi.protocols();
+    const response = await fetch(`${API_BASE}/pairing`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: composeSignal(),
+    });
+    const result = await parseJsonResponse<{
+      success: boolean;
+      data?: PairedAgent[];
+      error?: string;
+    }>(response);
+    if (!response.ok || !result.success || !result.data)
+      throw new Error(result.error ?? "Could not load paired agents.");
+    return result.data;
+  },
 
   /** Read the parked authorize request an agent started. */
   async consentPrompt(requestId: string, signal?: AbortSignal): Promise<ConsentPrompt> {
@@ -314,10 +368,11 @@ export const rillApi = {
     signal?: AbortSignal,
     accessToken?: string,
     manifest?: CapabilityManifest,
+    parentSkillId?: string,
   ) {
     return post<PublishResult>(
       "/publish",
-      { flow, ...(manifest ? { manifest } : {}) },
+      { flow, ...(manifest ? { manifest } : {}), ...(parentSkillId ? { parentSkillId } : {}) },
       signal,
       accessToken,
     );

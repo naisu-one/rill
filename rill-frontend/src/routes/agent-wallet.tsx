@@ -1,3 +1,4 @@
+import { SignerPairing } from "@/components/signer-pairing";
 import {
   loadGrantState,
   saveGrantState,
@@ -478,6 +479,21 @@ function AgentWalletPage() {
                 placeholder="0x… — run signer_status in your agent to read it"
                 className="mt-1.5 font-mono text-xs"
               />
+              {account && (
+                <SignerPairing
+                  key={account.address}
+                  owner={account.address}
+                  agent={agent}
+                  onSelect={setAgent}
+                  session={async () => {
+                    const session = await ensureSession(account.address, async (message) => {
+                      const { signature } = await signPersonalMessage({ message });
+                      return signature;
+                    });
+                    return session.accessToken;
+                  }}
+                />
+              )}
               {agent && selfOnboarding && (
                 <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-500">
                   That is your own address. The wallet would still work, but the agent would hold
@@ -571,6 +587,13 @@ function AgentWalletPage() {
                     ? "Check the submitted transaction before downloading your run set. No further signature is needed."
                     : "The next signature attaches capabilities and funds the wallet. If you cancel, it keeps no spending budget. Retry this step to continue."}
                 </p>
+                {pending.plan.protection && (
+                  <p className="text-xs text-emerald-600">
+                    Protected swap: the contract restricts the pool and output asset, enforces
+                    minimum output, and returns proceeds to your owner wallet. Unused input stays in
+                    the vault.
+                  </p>
+                )}
                 {!pending.attachment && (
                   <p className="text-xs text-muted-foreground">
                     Set when this wallet was created, not by the fields above:{" "}
