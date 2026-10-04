@@ -85,28 +85,28 @@ function AgentWalletPage() {
   const [price, setPrice] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingSetup | null>(null);
-  const [granted, setGranted] = useState<Granted | null>(null);
+  const [wallets, setWallets] = useState<Granted[]>([]);
   const [restoredOwner, setRestoredOwner] = useState<string | null>(null);
   const [prepared, setPrepared] = useState<PreparedGrant | null>(null);
   const [existingWallet, setExistingWallet] = useState("");
   useEffect(() => {
     const recovered = ownerAddress
       ? loadGrantState(rillApi.baseUrl, ownerAddress)
-      : { pending: null, granted: null };
+      : { pending: null, wallets: [] };
     setPending(recovered.pending);
-    setGranted(recovered.granted);
+    setWallets(recovered.wallets);
     setRestoredOwner(ownerAddress ?? null);
   }, [ownerAddress]);
   useEffect(() => {
     if (!ownerAddress || restoredOwner !== ownerAddress) return;
     if (pending && pending.input.sender !== ownerAddress) return;
-    if (granted && granted.owner !== ownerAddress) return;
-    if (!saveGrantState(rillApi.baseUrl, ownerAddress, { pending, granted })) {
+    if (wallets.some((wallet) => wallet.owner !== ownerAddress)) return;
+    if (!saveGrantState(rillApi.baseUrl, ownerAddress, { pending, wallets })) {
       toast.error(
         "Browser storage is unavailable. Keep this page open until you download the grant files.",
       );
     }
-  }, [ownerAddress, restoredOwner, pending, granted]);
+  }, [ownerAddress, restoredOwner, pending, wallets]);
 
   /** Load the signed-in address's own skills. Requires a session, since an ownerless listing would
    *  show skills this address cannot bind a wallet for. */
@@ -139,7 +139,7 @@ function AgentWalletPage() {
 
   /** Create an empty wallet first. No funds are granted until rules are attached. */
   async function grant() {
-    if (!account || busy || pending || granted) return;
+    if (!account || busy || pending) return;
     const budgetMist = suiToMist(budgetSui);
     const perTxMist = suiToMist(perTxSui);
     if (budgetMist === null || perTxMist === null || budgetMist <= 0n || perTxMist <= 0n) {
@@ -246,7 +246,7 @@ function AgentWalletPage() {
         setPending({ ...pending, attachment: undefined });
         throw new Error(receipt.error ?? "Funding did not succeed.");
       }
-      setGranted({
+      const onboarded: Granted = {
         walletId: objects.walletId!,
         agentCapId: objects.agentCapId!,
         balanceManagerId: objects.balanceManagerId,
@@ -261,7 +261,11 @@ function AgentWalletPage() {
         budgetMist: pending.input.budgetMist,
         perTxMist: pending.input.perTxMist,
         expiresAtMs: pending.input.expiresAtMs,
-      });
+      };
+      setWallets((list) => [
+        onboarded,
+        ...list.filter((wallet) => wallet.walletId !== onboarded.walletId),
+      ]);
       setPending(null);
       toast.success("Wallet configured and funded", {
         description: "One more signature grants the action to your agent.",
@@ -273,9 +277,8 @@ function AgentWalletPage() {
     }
   }
 
-  /** The grant request for the wallet onboarded on this page, from what the owner entered then. */
-  function grantInputForGranted(): GrantInput | null {
-    if (!granted) return null;
+  /** The grant request for a wallet onboarded on this page, from what the owner entered then. */
+  function grantInputForGranted(granted: Granted): GrantInput | null {
     const runSet = granted.runSet as {
       actionId?: string;
       maxAmountBaseUnits?: string;
@@ -353,9 +356,13 @@ function AgentWalletPage() {
         undefined,
         session.accessToken,
       );
-      if (granted && granted.walletId === prepared.grant.walletId) {
-        setGranted({ ...granted, grantRevision: stored.revision });
-      }
+      setWallets((list) =>
+        list.map((wallet) =>
+          wallet.walletId === prepared.grant.walletId
+            ? { ...wallet, grantRevision: stored.revision }
+            : wallet,
+        ),
+      );
       toast.success(`Granted to your agent (revision ${stored.revision})`, {
         description: "Ask your agent to list its Rill actions; it can run this one now.",
       });
@@ -367,8 +374,7 @@ function AgentWalletPage() {
     }
   }
 
-  function downloadArtifact(kind: "runSet" | "buildArguments") {
-    if (!granted) return;
+  function downloadArtifact(granted: Granted, kind: "runSet" | "buildArguments") {
     const url = URL.createObjectURL(
       new Blob([JSON.stringify(granted[kind], null, 2) + "\n"], {
         type: "application/json",
@@ -382,8 +388,8 @@ function AgentWalletPage() {
   }
 
   /** The kill switch. Owner-only on-chain, which is exactly why it lives on this page. */
-  async function revoke() {
-    if (!account || !granted || account.address !== granted.owner) return;
+  async function revoke(granted: Granted) {
+    if (!account || busy || account.address !== granted.owner) return;
     setBusy("Waiting for your wallet…");
     try {
       const result = await signAndExecute({
@@ -398,7 +404,7 @@ function AgentWalletPage() {
         throw new Error(receipt.error ?? "Revocation did not succeed.");
       }
       toast.success("Revoked", { description: "The remaining budget is back in your wallet." });
-      setGranted(null);
+      setWallets((list) => list.filter((wallet) => wallet.walletId !== granted.walletId));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Revoking failed.");
     } finally {
@@ -593,7 +599,7 @@ function AgentWalletPage() {
                   </Button>
                 )}
               </div>
-            ) : !granted ? (
+            ) : (
               <div className="space-y-4">
                 <Button onClick={grant} disabled={Boolean(busy) || !skillId || !agent}>
                   {busy ?? "Create empty wallet"}
@@ -624,73 +630,93 @@ function AgentWalletPage() {
                   </div>
                 </details>
               </div>
-            ) : (
-              <div className="space-y-4 rounded-xl border border-border p-4">
-                <div className="text-sm font-medium">Granted</div>
-                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-xs">
-                  <dt className="text-muted-foreground">wallet</dt>
-                  <dd className="break-all">{granted.walletId}</dd>
-                  <dt className="text-muted-foreground">agentCap</dt>
-                  <dd className="break-all">{granted.agentCapId}</dd>
-                  {granted.balanceManagerId && (
-                    <>
-                      <dt className="text-muted-foreground">manager</dt>
-                      <dd className="break-all">{granted.balanceManagerId}</dd>
-                    </>
-                  )}
-                  {granted.tradeCapId && (
-                    <>
-                      <dt className="text-muted-foreground">tradeCap</dt>
-                      <dd className="break-all">{granted.tradeCapId}</dd>
-                    </>
-                  )}
-                  {granted.depositCapId && (
-                    <>
-                      <dt className="text-muted-foreground">depositCap</dt>
-                      <dd className="break-all">{granted.depositCapId}</dd>
-                    </>
-                  )}
-                </dl>
-                {granted.grantRevision ? (
-                  <p className="text-sm text-emerald-600 dark:text-emerald-500">
-                    Granted to your agent (revision {granted.grantRevision}). Ask it to list its
-                    Rill actions and run this one.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                      Last step: sign a grant so your agent's signer can run this action. It only
-                      ever signs what this grant allows.
-                    </p>
-                    <Button
-                      onClick={() => prepareActionGrant(grantInputForGranted())}
-                      disabled={
-                        Boolean(busy) || Boolean(prepared) || account.address !== granted.owner
-                      }
-                    >
-                      Grant this action to the agent
-                    </Button>
-                  </div>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" onClick={() => downloadArtifact("runSet")}>
-                    Download run set (advanced)
-                  </Button>
-                  <Button variant="outline" onClick={() => downloadArtifact("buildArguments")}>
-                    Download build arguments
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={revoke}
-                    disabled={Boolean(busy) || account.address !== granted.owner}
+            )}
+
+            {wallets.length > 0 && (
+              <div className="space-y-3">
+                <div className="text-sm font-medium">Your agent wallets</div>
+                {wallets.map((granted) => (
+                  <div
+                    key={granted.walletId}
+                    className="space-y-4 rounded-xl border border-border p-4"
                   >
-                    Revoke &amp; reclaim
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Revoking marks the wallet revoked on-chain and returns the remaining budget to
-                  you. The agent's next attempt fails before it ever signs.
-                </p>
+                    <div className="text-sm font-medium">
+                      Funded wallet
+                      {granted.actionId && (
+                        <span className="ml-2 font-mono text-xs text-muted-foreground">
+                          {granted.actionId}
+                        </span>
+                      )}
+                    </div>
+                    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-xs">
+                      <dt className="text-muted-foreground">wallet</dt>
+                      <dd className="break-all">{granted.walletId}</dd>
+                      <dt className="text-muted-foreground">agentCap</dt>
+                      <dd className="break-all">{granted.agentCapId}</dd>
+                      {granted.balanceManagerId && (
+                        <>
+                          <dt className="text-muted-foreground">manager</dt>
+                          <dd className="break-all">{granted.balanceManagerId}</dd>
+                        </>
+                      )}
+                      {granted.tradeCapId && (
+                        <>
+                          <dt className="text-muted-foreground">tradeCap</dt>
+                          <dd className="break-all">{granted.tradeCapId}</dd>
+                        </>
+                      )}
+                      {granted.depositCapId && (
+                        <>
+                          <dt className="text-muted-foreground">depositCap</dt>
+                          <dd className="break-all">{granted.depositCapId}</dd>
+                        </>
+                      )}
+                    </dl>
+                    {granted.grantRevision ? (
+                      <p className="text-sm text-emerald-600 dark:text-emerald-500">
+                        Granted to your agent (revision {granted.grantRevision}). Ask it to list its
+                        Rill actions and run this one.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground">
+                          Last step: sign a grant so your agent's signer can run this action. It
+                          only ever signs what this grant allows.
+                        </p>
+                        <Button
+                          onClick={() => prepareActionGrant(grantInputForGranted(granted))}
+                          disabled={
+                            Boolean(busy) || Boolean(prepared) || account.address !== granted.owner
+                          }
+                        >
+                          Grant this action to the agent
+                        </Button>
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" onClick={() => downloadArtifact(granted, "runSet")}>
+                        Download run set (advanced)
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => downloadArtifact(granted, "buildArguments")}
+                      >
+                        Download build arguments
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => revoke(granted)}
+                        disabled={Boolean(busy) || account.address !== granted.owner}
+                      >
+                        Revoke &amp; reclaim
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Revoking marks the wallet revoked on-chain and returns the remaining budget to
+                      you. The agent's next attempt fails before it ever signs.
+                    </p>
+                  </div>
+                ))}
               </div>
             )}
           </div>

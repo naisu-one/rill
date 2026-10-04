@@ -44,7 +44,18 @@ function state(): GrantState {
         buildArguments: { sender: "0x2" },
       },
     },
-    granted: null,
+    wallets: [],
+  };
+}
+function wallet(walletId: string) {
+  return {
+    walletId,
+    agentCapId: "0xe",
+    walletPackageId: "0xa",
+    owner,
+    runSet: { actionId: "skill_1" },
+    buildArguments: { sender: "0x2" },
+    digest: `confirmed-${walletId}`,
   };
 }
 describe("grant recovery", () => {
@@ -59,20 +70,23 @@ describe("grant recovery", () => {
     expect(loadGrantState("https://other/api", owner).pending).toBeNull();
   });
   it("preserves confirmed downloadable artifacts", () => {
-    const s: GrantState = {
-      pending: null,
-      granted: {
-        walletId: "0xd",
-        agentCapId: "0xe",
-        walletPackageId: "0xa",
-        owner,
-        runSet: { actionId: "skill_1" },
-        buildArguments: { sender: "0x2" },
-        digest: "confirmed",
-      },
-    };
+    const s: GrantState = { pending: null, wallets: [wallet("0xd"), wallet("0xf")] };
     saveGrantState(base, owner, s);
     expect(loadGrantState(base, owner)).toEqual(s);
+  });
+  // A wallet onboarded before the list existed must still show up, or its owner loses the
+  // page's revoke button for it.
+  it("reads a version 1 single granted wallet as a one-wallet list", () => {
+    localStorage.setItem(
+      `rill:grant:v1:${encodeURIComponent(base)}:${owner}`,
+      JSON.stringify({ version: 1, pending: null, granted: wallet("0xd") }),
+    );
+    expect(loadGrantState(base, owner)).toEqual({ pending: null, wallets: [wallet("0xd")] });
+  });
+  it("refuses a list that names another owner's wallet", () => {
+    expect(
+      saveGrantState(base, owner, { pending: null, wallets: [{ ...wallet("0xd"), owner: "0x9" }] }),
+    ).toBe(false);
   });
   it("reports unavailable persistence without losing the caller state", () => {
     vi.stubGlobal("localStorage", {
@@ -84,6 +98,6 @@ describe("grant recovery", () => {
       },
     });
     expect(saveGrantState(base, owner, state())).toBe(false);
-    expect(loadGrantState(base, owner)).toEqual({ pending: null, granted: null });
+    expect(loadGrantState(base, owner)).toEqual({ pending: null, wallets: [] });
   });
 });
