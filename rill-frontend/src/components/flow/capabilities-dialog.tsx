@@ -22,6 +22,8 @@ import {
   type CapabilityRule,
   type RuleKind,
 } from "@/lib/capabilities";
+import { SWAP_TOKENS, TOKEN_COIN_TYPE, type SwapTokenSymbol } from "@/lib/action-config";
+import { findToken } from "../../../../packages/rill-sdk/src";
 
 /**
  * Wallet-level capability composer (U7): compose a `CapabilityManifest` rule-by-rule and see an
@@ -47,8 +49,10 @@ function defaultDraftForKind(kind: RuleKind): Record<string, string> {
   switch (kind) {
     case "budget":
     case "per_tx":
-    case "slippage_floor":
       return { amount: "" };
+    // A Studio wallet holds SUI and its swaps output USDC, so that is the floor's usual coin.
+    case "slippage_floor":
+      return { amount: "", coin: "USDC" };
     case "rate_limit":
       return { amount: "", windowMs: "3600000" };
     case "protocol_scope":
@@ -75,8 +79,15 @@ function seedDraftFromRule(rule: CapabilityRule): Record<string, string> {
       return { amount: baseUnitsToDecimal(rule.maxMist) };
     case "rate_limit":
       return { amount: baseUnitsToDecimal(rule.maxMist), windowMs: rule.windowMs };
-    case "slippage_floor":
-      return { amount: baseUnitsToDecimal(rule.minOutMist) };
+    case "slippage_floor": {
+      // A floor saved before it named its coin has no decimals to show it in: keep its base units
+      // visible rather than guess, and let the owner restate it in a coin.
+      const coin = SWAP_TOKENS.find((t) => TOKEN_COIN_TYPE[t.symbol] === rule.coinType)?.symbol;
+      const decimals = rule.coinType ? findToken(rule.coinType)?.decimals : undefined;
+      return coin && decimals !== undefined
+        ? { amount: baseUnitsToDecimal(rule.minOutMist, decimals), coin }
+        : { amount: "", coin: "USDC" };
+    }
     case "protocol_scope":
       return { list: listToText(rule.allowedPackages) };
     case "asset_scope":
@@ -113,10 +124,11 @@ function buildRuleFromDraft(kind: RuleKind, draft: Record<string, string>): Capa
       }
     }
     case "slippage_floor": {
+      const coinType = TOKEN_COIN_TYPE[(draft.coin as SwapTokenSymbol) || "USDC"];
       try {
-        return slippageFloorRule(amount);
+        return slippageFloorRule(amount, coinType);
       } catch {
-        return { kind, minOutMist: amount };
+        return { kind, minOutMist: amount, coinType };
       }
     }
     case "rate_limit": {
@@ -178,13 +190,39 @@ function RuleFields({
   const inputClass =
     "mt-1 w-full rounded-lg bg-background border border-border px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary/40";
 
-  if (kind === "budget" || kind === "per_tx" || kind === "slippage_floor") {
-    const label =
-      kind === "budget"
-        ? "Total budget (SUI)"
-        : kind === "per_tx"
-          ? "Max per transaction (SUI)"
-          : "Minimum swap output (SUI)";
+  if (kind === "slippage_floor") {
+    return (
+      <div className="grid grid-cols-[1fr_auto] gap-2">
+        <label className="block text-[11px] text-muted-foreground">
+          Minimum swap output, in the coin the swap returns
+          <input
+            value={draft.amount ?? ""}
+            onChange={(e) => onFieldChange("amount", e.target.value)}
+            placeholder="e.g. 0.05"
+            inputMode="decimal"
+            className={inputClass}
+          />
+        </label>
+        <label className="block text-[11px] text-muted-foreground">
+          Coin
+          <select
+            value={draft.coin ?? "USDC"}
+            onChange={(e) => onFieldChange("coin", e.target.value)}
+            className={inputClass}
+          >
+            {SWAP_TOKENS.map((t) => (
+              <option key={t.symbol} value={t.symbol}>
+                {t.symbol}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    );
+  }
+
+  if (kind === "budget" || kind === "per_tx") {
+    const label = kind === "budget" ? "Total budget (SUI)" : "Max per transaction (SUI)";
     return (
       <label className="block text-[11px] text-muted-foreground">
         {label}

@@ -19,6 +19,7 @@ import {
   type SlippageFloorRule,
   type TimeWindowRule,
   decimalToBaseUnits,
+  findToken,
 } from "../../../packages/rill-sdk/src";
 
 /**
@@ -133,11 +134,18 @@ export function rateLimitRule(
   };
 }
 
-export function slippageFloorRule(
-  minOutSui: string,
-  decimals: number = SUI_DECIMALS,
-): SlippageFloorRule {
-  return { kind: "slippage_floor", minOutMist: decimalToBaseUnits(minOutSui, decimals).toString() };
+/** `minOut` is a decimal amount of `coinType`, the swap's OUTPUT coin, and the rule carries that
+ *  coin: the compiler compares the floor with each swap's output in that coin's base units, so a
+ *  floor converted with the wallet coin's decimals (SUI's 9) against a USDC output (6) asked for a
+ *  thousand times too much. */
+export function slippageFloorRule(minOut: string, coinType: string): SlippageFloorRule {
+  const decimals = findToken(coinType)?.decimals;
+  if (decimals === undefined) throw new Error(`Unknown output coin ${coinType || "(not loaded)"}.`);
+  return {
+    kind: "slippage_floor",
+    minOutMist: decimalToBaseUnits(minOut, decimals).toString(),
+    coinType,
+  };
 }
 
 /** Splits a comma- and/or newline-separated textarea value into a trimmed, non-empty string list —

@@ -24,7 +24,7 @@ function fullManifest(): CapabilityManifest {
       { kind: 'per_tx', maxMist: '1000000000' },
       { kind: 'rate_limit', windowMs: '3600000', maxMist: '2000000000' },
       { kind: 'protocol_scope', allowedPackages: [hex(1), hex(2)] },
-      { kind: 'slippage_floor', minOutMist: '1500000000' },
+      { kind: 'slippage_floor', minOutMist: '1500000', coinType: USDC_MAINNET },
       { kind: 'asset_scope', allowedCoinTypes: ['0x2::sui::SUI', USDC_MAINNET] },
       { kind: 'recipient_allowlist', addresses: [hex(3)] },
       { kind: 'time_window', notBeforeMs: '1700000000000', notAfterMs: '1800000000000' },
@@ -302,7 +302,7 @@ test('toSignerPolicy yields the agreed flat shape for the full 8-rule manifest',
     perTxMaxMist: '1000000000',
     window: { windowMs: '3600000', maxMist: '2000000000' },
     allowedPackages: [hex(1), hex(2)],
-    minSlippageOutMist: '1500000000',
+    minSlippageOutMist: '1500000',
     allowedCoinTypes: ['0x2::sui::SUI', USDC_MAINNET],
     allowedRecipients: [hex(3)],
     timeWindow: { notBeforeMs: '1700000000000', notAfterMs: '1800000000000' },
@@ -359,11 +359,23 @@ test('toDeclaration describes a protocol_scope rule in plain language', () => {
   ]);
 });
 
-test('toDeclaration describes a slippage_floor rule as an absolute min-output amount, labeled pre-flight', () => {
-  const manifest = CapabilityManifestSchema.parse(oneRuleManifest({ kind: 'slippage_floor', minOutMist: '500000000' }));
+test('toDeclaration describes a slippage_floor rule in the coin it names, labeled pre-flight', () => {
+  const manifest = CapabilityManifestSchema.parse(
+    oneRuleManifest({ kind: 'slippage_floor', minOutMist: '500000000', coinType: '0x2::sui::SUI' }),
+  );
   const declaration = toDeclaration(manifest);
   expect(declaration.summaryLines).toEqual(['Min swap output ≥ 0.5 SUI']);
   expect(declaration.caps).toEqual([{ label: 'Min swap output', value: '0.5 SUI', enforcement: 'pre-flight' }]);
+});
+
+// The floor is counted in the swap's OUTPUT coin. Without a coin it cannot be rendered in the
+// wallet's: a SUI wallet's "0.05 SUI" floor on a USDC swap meant 50 USDC.
+test('toDeclaration never renders a coin-less slippage_floor in the wallet coin', () => {
+  const manifest = CapabilityManifestSchema.parse(oneRuleManifest({ kind: 'slippage_floor', minOutMist: '50000000' }));
+  const declaration = toDeclaration(manifest);
+  expect(declaration.caps).toEqual([
+    { label: 'Min swap output', value: "50000000 base units of each swap's output coin", enforcement: 'pre-flight' },
+  ]);
 });
 
 test('toDeclaration describes an asset_scope rule in plain language', () => {
@@ -471,12 +483,13 @@ test('a full 8-rule manifest round-trips through all 3 projections without losin
   expect(declaration.caps.find((c) => c.label === 'Allowed coins')?.enforcement).toBe('pre-flight');
 
   // slippage_floor is pre-flight only: no on-chain entry, but the signer policy and declaration
-  // agree on the absolute floor (1.5 SUI / 1500000000 mist), and the declaration honestly labels
+  // agree on the absolute floor (1.5 USDC / 1500000 base units, in the swap's output coin), and
+  // the declaration honestly labels
   // it 'pre-flight' rather than implying an on-chain guarantee.
   expect(onChain.find((p) => p.module === 'slippage_floor')).toBeUndefined();
-  expect(signerPolicy.minSlippageOutMist).toBe('1500000000');
+  expect(signerPolicy.minSlippageOutMist).toBe('1500000');
   const slippageCap = declaration.caps.find((c) => c.label === 'Min swap output');
-  expect(slippageCap?.value).toBe('1.5 SUI');
+  expect(slippageCap?.value).toBe('1.5 USDC');
   expect(slippageCap?.enforcement).toBe('pre-flight');
 
   // budget, per_tx, rate_limit, time_window all have an on-chain projection AND are labeled

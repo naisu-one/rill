@@ -1,3 +1,4 @@
+import { TOKEN_COIN_TYPE } from "@/lib/action-config";
 import { describe, expect, it } from "vitest";
 import { toDeclaration, type CapabilityManifest } from "../../../packages/rill-sdk/src";
 import {
@@ -28,8 +29,22 @@ describe("amount builders route every SUI amount through decimalToBaseUnits", ()
     expect(perTxRule("10")).toEqual({ kind: "per_tx", maxMist: "10000000000" });
   });
 
-  it("slippageFloorRule: 0.99 SUI -> 990000000 mist", () => {
-    expect(slippageFloorRule("0.99")).toEqual({ kind: "slippage_floor", minOutMist: "990000000" });
+  it("slippageFloorRule: 0.99 SUI -> 990000000 mist, naming SUI", () => {
+    expect(slippageFloorRule("0.99", "0x2::sui::SUI")).toEqual({
+      kind: "slippage_floor",
+      minOutMist: "990000000",
+      coinType: "0x2::sui::SUI",
+    });
+  });
+
+  // The bug this replaced: every floor went through SUI's 9 decimals, so "0.05" against a USDC
+  // output became 50000000 USDC base units, 50 USDC.
+  it("slippageFloorRule: 0.05 USDC uses USDC's 6 decimals, not SUI's 9", () => {
+    expect(slippageFloorRule("0.05", TOKEN_COIN_TYPE.USDC)).toEqual({
+      kind: "slippage_floor",
+      minOutMist: "50000",
+      coinType: TOKEN_COIN_TYPE.USDC,
+    });
   });
 
   it("rateLimitRule: amount converts, windowMs passes through as a decimal ms string", () => {
@@ -158,7 +173,7 @@ describe("validateManifest", () => {
         perTxRule("1"),
         rateLimitRule("2", "3600000"),
         protocolScopeRule(`0x${"a".repeat(64)}`),
-        slippageFloorRule("0.99"),
+        slippageFloorRule("0.99", "0x2::sui::SUI"),
         assetScopeRule("0x2::sui::SUI"),
         recipientAllowlistRule(`0x${"b".repeat(64)}`),
         timeWindowRule("2026-01-01T00:00", "2026-01-02T00:00"),

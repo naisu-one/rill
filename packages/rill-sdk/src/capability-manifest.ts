@@ -114,6 +114,11 @@ const SlippageFloorRuleSchema = z.object({
    *  compiler's min-out guardrail refuses to build a PTB whose quoted output undercuts it, and the
    *  signer independently re-checks the actual swap output before countersigning. */
   minOutMist: u64String('rules[slippage_floor].minOutMist'),
+  /** The coin `minOutMist` is counted in: the swap's OUTPUT coin, not the wallet's. When set, the
+   *  floor binds only swaps that output this coin and is shown in its units. Absent on manifests
+   *  written before it existed, where the floor binds every swap and is shown as plain base units:
+   *  rendering it in the wallet coin is how "0.05 SUI" came to mean 50 USDC. */
+  coinType: z.string().regex(/^[^:]+::[^:]+::[^:]+$/, 'rules[slippage_floor].coinType: expected a coin type like 0x2::sui::SUI').optional(),
 }).strict();
 
 const AssetScopeRuleSchema = z.object({
@@ -478,7 +483,9 @@ function describeRule(rule: CapabilityRule, walletCoinType: string): { summaryLi
       return { summaryLine: `Only protocols: ${value}`, cap: { label: 'Allowed protocols', value, enforcement } };
     }
     case 'slippage_floor': {
-      const value = formatAmount(rule.minOutMist, walletCoinType);
+      const value = rule.coinType
+        ? formatAmount(rule.minOutMist, rule.coinType)
+        : `${rule.minOutMist} base units of each swap's output coin`;
       return {
         summaryLine: `Min swap output ≥ ${value}`,
         cap: { label: 'Min swap output', value, enforcement },
