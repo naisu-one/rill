@@ -15,7 +15,9 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: eseslabs/rill-backend
+  # The repository's own owner: the image was hard-coded to an org that no longer exists, so every
+  # push to main failed at the push step.
+  IMAGE_NAME: ${{ github.repository_owner }}/rill-backend
   PLATFORMS: linux/amd64
 
 permissions:
