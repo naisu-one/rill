@@ -8,7 +8,7 @@ import { SUI_NETWORK } from "@/lib/sui-network";
 export function SiteHeader() {
   return (
     <header className="sticky top-0 z-40 backdrop-blur-md bg-background/70 border-b border-border/60">
-      <div className="mx-auto max-w-6xl px-3 sm:px-6 h-14 flex items-center justify-between">
+      <div className="mx-auto max-w-6xl px-3 sm:px-6 min-h-14 py-2 flex flex-wrap items-center gap-2">
         <Link to="/" className="flex items-center gap-2 cursor-pointer">
           <motion.span
             initial={{ rotate: -8, scale: 0.9 }}
@@ -23,35 +23,38 @@ export function SiteHeader() {
             {SUI_NETWORK}
           </span>
         </Link>
-        <nav className="flex items-center gap-1 text-sm">
+        <nav
+          aria-label="Main navigation"
+          className="order-3 flex w-full flex-wrap items-center justify-center gap-1 text-sm sm:order-none sm:ml-auto sm:w-auto"
+        >
           <Link
             to="/protocols"
-            className="hidden sm:block cursor-pointer px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
+            className="cursor-pointer px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
           >
             Protocols
           </Link>
           <Link
             to="/docs"
-            className="hidden sm:block cursor-pointer px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
+            className="cursor-pointer px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
           >
             Docs
           </Link>
           <Link
-            to="/pitch"
-            className="hidden sm:block cursor-pointer px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
+            to="/agent-wallet"
+            className="cursor-pointer px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
           >
-            Pitch
+            Agent Wallet
           </Link>
           <Link
             to="/builder"
-            className="ml-2 hidden md:inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-foreground text-background px-3.5 py-1.5 text-sm font-medium hover:opacity-90 transition"
+            className="ml-1 inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-foreground text-background px-3.5 py-1.5 text-sm font-medium hover:opacity-90 transition"
           >
-            Open builder <ArrowRight className="h-3.5 w-3.5" />
+            Builder <ArrowRight className="h-3.5 w-3.5" />
           </Link>
-          <span className="ml-2">
-            <ConnectButton />
-          </span>
         </nav>
+        <span className="ml-auto sm:ml-2">
+          <ConnectButton />
+        </span>
       </div>
     </header>
   );
@@ -80,7 +83,7 @@ export function SiteFooter() {
             MCP
           </a>
           <a
-            href="https://github.com/eseslabs/rill"
+            href="https://github.com/rifuki/rill"
             target="_blank"
             rel="noreferrer"
             className="cursor-pointer hover:text-foreground"

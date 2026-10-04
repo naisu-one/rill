@@ -95,7 +95,7 @@ export const RULE_KIND_META: Record<RuleKind, RuleKindMeta> = {
     kind: "slippage_floor",
     label: "Min swap output",
     blurb:
-      "Minimum acceptable swap output — enforced pre-flight, never on-chain (the real output doesn't exist yet at prove time).",
+      "Minimum acceptable swap output. Protected swaps check the actual output on chain; other flows use compiler and signer checks.",
     enforcement: "pre-flight",
   },
 };

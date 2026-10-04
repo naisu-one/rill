@@ -13,7 +13,7 @@ import {
   useSignAndExecuteTransaction,
   useSignPersonalMessage,
 } from "@mysten/dapp-kit";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { SiteHeader } from "@/components/site-chrome";
 import { Button } from "@/components/ui/button";
@@ -34,16 +34,19 @@ import {
   type SetupPlan,
   type SetupInput,
   type SwapFundingPreview,
+  type PairedAgent,
 } from "@/lib/rill-api";
+import { defaultPairedAgent } from "@/lib/signer-pairing";
+import { SUI_NETWORK } from "@/lib/sui-network";
 import { ensureSession } from "@/lib/rill-session";
 import { executeSigned, waitForOutcome } from "@/lib/sui-chain";
 
 /**
- * Grant an agent a bounded on-chain wallet — the one place a human approves anything in Rill.
+ * Grant an agent a bounded on-chain wallet: the one place a human approves anything in Rill.
  *
  * The whole point of this page is the separation it creates. `agent_wallet` reserves `revoke`,
  * `add_rule`, `remove_rule` and `rotate_agent` for the owner precisely so an agent cannot widen its
- * own limits — but that guard is vacuous if one key holds both roles, which is what the local
+ * own limits: but that guard is vacuous if one key holds both roles, which is what the local
  * signer's self-onboarding path does. Here the OWNER is your browser wallet and the AGENT is the
  * local `rill-wallet` key, so the kill switch genuinely lives somewhere the agent cannot reach.
  *
@@ -54,7 +57,7 @@ import { executeSigned, waitForOutcome } from "@/lib/sui-chain";
 export const Route = createFileRoute("/agent-wallet")({
   head: () => ({
     meta: [
-      { title: "Agent wallet — Rill" },
+      { title: "Agent wallet: Rill" },
       { name: "description", content: "Grant your agent a capped, revocable on-chain wallet." },
     ],
   }),
@@ -74,6 +77,9 @@ function suiToMist(value: string): bigint | null {
 function AgentWalletPage() {
   const account = useCurrentAccount();
   const ownerAddress = account?.address;
+  const currentOwner = useRef(ownerAddress);
+  currentOwner.current = ownerAddress;
+  const [pairedAgents, setPairedAgents] = useState<PairedAgent[]>([]);
   // The wallet signs; submission and confirmation go over gRPC, because public fullnodes no longer
   // serve the JSON-RPC that dapp-kit would otherwise use. See lib/sui-chain.ts.
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction({ execute: executeSigned });
@@ -135,12 +141,24 @@ function AgentWalletPage() {
         const { signature } = await signPersonalMessage({ message });
         return signature;
       });
-      const list = await rillApi.skills(session.accessToken);
+      const [actions, pairing] = await Promise.allSettled([
+        rillApi.skills(session.accessToken),
+        rillApi.pairedAgents(session.accessToken),
+      ]);
+      if (currentOwner.current !== account.address) return;
+      if (actions.status === "rejected") throw actions.reason;
+      const list = actions.value;
+      if (pairing.status === "fulfilled") {
+        setPairedAgents(pairing.value);
+        setAgent((selected) =>
+          defaultPairedAgent(pairing.value, account.address, SUI_NETWORK, selected),
+        );
+      }
       setSkills(list);
       if (list.length > 0) setSkillId((current) => current || list[0].id);
       if (list.length === 0)
         toast.message("No published actions yet", {
-          description: "Publish a flow in the builder first — a wallet is granted per action.",
+          description: "Publish a flow in the builder first: a wallet is granted per action.",
         });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not load your actions.");
@@ -152,6 +170,8 @@ function AgentWalletPage() {
   useEffect(() => {
     setSkills([]);
     setSkillId("");
+    setAgent("");
+    setPairedAgents([]);
   }, [account?.address]);
 
   /** Create an empty wallet first. No funds are granted until rules are attached. */
@@ -455,20 +475,19 @@ function AgentWalletPage() {
       <SiteHeader />
       <section className="mx-auto max-w-2xl px-6 pt-14 pb-24">
         <div className="text-xs uppercase tracking-widest text-muted-foreground">Agent wallet</div>
-        <h1 className="mt-2 font-display text-4xl tracking-tight">Grant a bounded budget</h1>
+        <h1 className="mt-2 font-display text-4xl tracking-tight">Connect your agent</h1>
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-          First create an empty wallet, then attach its capabilities and fund it in one transaction,
-          then sign a grant for the action. After that your agent can run the action within the
-          granted limits. You keep the ability to revoke the wallet and reclaim its remaining
-          budget.
+          Choose your action and agent, then approve a spending budget. Your agent keeps its own
+          signer and runs within your limits. Your browser wallet keeps control of revocation and
+          reclaiming unused funds.
         </p>
 
         {!account ? (
           <div className="mt-8">
             <ConnectButton />
             <p className="mt-3 text-xs text-muted-foreground">
-              Connect the wallet that should OWN the budget. It keeps the kill switch; the agent
-              never gets it.
+              Connect your wallet to approve budgets and reclaim unused funds. Your agent uses
+              its own signer.
             </p>
           </div>
         ) : (
@@ -499,18 +518,11 @@ function AgentWalletPage() {
             </div>
 
             <div>
-              <Label htmlFor="agent">Agent address</Label>
-              <Input
-                id="agent"
-                value={agent}
-                onChange={(event) => setAgent(event.target.value)}
-                placeholder="0x… — run signer_status in your agent to read it"
-                className="mt-1.5 font-mono text-xs"
-              />
               {account && (
                 <SignerPairing
                   key={account.address}
                   owner={account.address}
+                  initialAgents={pairedAgents}
                   agent={agent}
                   onSelect={setAgent}
                   session={async () => {
@@ -525,7 +537,7 @@ function AgentWalletPage() {
               {agent && selfOnboarding && (
                 <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-500">
                   That is your own address. The wallet would still work, but the agent would hold
-                  its own kill switch and could lift its own limits — use the local signer's address
+                  its own kill switch and could lift its own limits: use the local signer's address
                   instead.
                 </p>
               )}
@@ -712,7 +724,7 @@ function AgentWalletPage() {
                       id="existing-wallet"
                       value={existingWallet}
                       onChange={(event) => setExistingWallet(event.target.value)}
-                      placeholder="0x… — a wallet you own, already carrying its rules"
+                      placeholder="0x…: a wallet you own, already carrying its rules"
                       className="font-mono text-xs"
                     />
                     <p className="text-xs text-muted-foreground">

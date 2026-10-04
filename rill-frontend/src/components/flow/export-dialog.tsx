@@ -14,7 +14,7 @@ import { parentPublication } from "@/lib/publish-lineage";
 import { hashFlowGraph } from "@/lib/graph-hash";
 import { rillApi, type PublishResult } from "@/lib/rill-api";
 import { SUI_NETWORK } from "@/lib/sui-network";
-import { useCurrentAccount, useSignPersonalMessage } from "@mysten/dapp-kit";
+import { ConnectButton, useCurrentAccount, useSignPersonalMessage } from "@mysten/dapp-kit";
 import { ensureSession } from "@/lib/rill-session";
 import { useFlowRequest } from "@/lib/use-flow-request";
 import { validateManifest, type CapabilityManifest } from "@/lib/capabilities";
@@ -182,6 +182,10 @@ export function ExportDialog({
     }
 
     if (signingIn || publishing) return;
+    if (!account) {
+      toast.error("Connect your owner wallet before publishing an agent action.");
+      return;
+    }
     const snapshot = { flow: structuredClone(graph), manifest: structuredClone(manifest), hash };
     // A connected wallet must prove ownership before publishing its action.
     sessionTokenRef.current = undefined;
@@ -400,21 +404,32 @@ export function ExportDialog({
               </motion.p>
             )}
 
-            <motion.button
-              variants={fadeUp}
-              whileHover={gate.publishable ? { scale: 1.02 } : undefined}
-              whileTap={gate.publishable ? { scale: 0.98 } : undefined}
-              onClick={handlePublish}
-              aria-disabled={!gate.publishable}
-              aria-describedby={!gate.publishable ? "export-gate-reason" : undefined}
-              className={`w-full inline-flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition-colors ${
-                gate.publishable
-                  ? "cursor-pointer bg-foreground text-background hover:opacity-90"
-                  : "cursor-not-allowed bg-foreground/40 text-background/70"
-              }`}
-            >
-              {signingIn ? "Waiting for your wallet…" : "Publish"}
-            </motion.button>
+            {!account ? (
+              <div className="space-y-3 rounded-lg border border-border p-3">
+                <p className="text-xs text-muted-foreground">
+                  Connect your owner wallet to publish. This keeps the action in your account so you
+                  can grant it to an agent from Agent Wallet.
+                </p>
+                <ConnectButton />
+              </div>
+            ) : (
+              <motion.button
+                variants={fadeUp}
+                whileHover={gate.publishable ? { scale: 1.02 } : undefined}
+                whileTap={gate.publishable ? { scale: 0.98 } : undefined}
+                onClick={handlePublish}
+                disabled={!gate.publishable || signingIn || publishing}
+                aria-disabled={!gate.publishable || signingIn || publishing}
+                aria-describedby={!gate.publishable ? "export-gate-reason" : undefined}
+                className={`w-full inline-flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition-colors ${
+                  gate.publishable
+                    ? "cursor-pointer bg-foreground text-background hover:opacity-90"
+                    : "cursor-not-allowed bg-foreground/40 text-background/70"
+                }`}
+              >
+                {signingIn ? "Waiting for your wallet…" : "Publish"}
+              </motion.button>
+            )}
           </motion.div>
         )}
 

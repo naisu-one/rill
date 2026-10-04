@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { pairedForOwner, pairingCommand, samePairingContext } from "./signer-pairing";
+import {
+  defaultPairedAgent,
+  pairedForOwner,
+  pairingCommand,
+  samePairingContext,
+} from "./signer-pairing";
 const agent = `0x${"2".repeat(64)}`;
 describe("local signer pairing", () => {
   it("discards completions after owner, signer or request changes", () => {
@@ -38,4 +43,20 @@ describe("local signer pairing", () => {
       ),
     ).toEqual([base]);
   });
+});
+
+it("selects a single verified signer without choosing another owner or overwriting a choice", () => {
+  const record = { owner: "owner", agent, network: "mainnet", pairedAt: 1 };
+  expect(defaultPairedAgent([record], "owner", "mainnet", "")).toBe(agent);
+  expect(defaultPairedAgent([record], "other", "mainnet", "")).toBe("");
+  expect(defaultPairedAgent([record], "owner", "testnet", "")).toBe("");
+  expect(
+    defaultPairedAgent(
+      [record, { ...record, agent: `0x${"3".repeat(64)}` }],
+      "owner",
+      "mainnet",
+      "",
+    ),
+  ).toBe("");
+  expect(defaultPairedAgent([record], "owner", "mainnet", "explicit")).toBe("explicit");
 });

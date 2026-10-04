@@ -12,7 +12,7 @@ import {
 
 /**
  * Discover a Sui protocol by reading its real on-chain ABI via the backend (`POST /introspect`).
- * No mock data — paste a package id and Rill returns the actual entry functions + typed params.
+ * No mock data: paste a package id and Rill returns the actual entry functions + typed params.
  */
 export function DiscoverDialog({
   open,
@@ -34,12 +34,14 @@ export function DiscoverDialog({
     reset,
   } = useFlowRequest<IntrospectionResult>((signal) => {
     const packageId = pkg.trim();
-    return rillApi.introspect(packageId, signal).then((fns) => backendFunctionsToDiscovered(packageId, fns));
+    return rillApi
+      .introspect(packageId, signal)
+      .then((fns) => backendFunctionsToDiscovered(packageId, fns));
   });
 
   // This dialog is now mounted persistently (Radix controls its visibility),
   // not remounted per open, so the form is reset explicitly every time it
-  // opens — mirrors the old fresh-mount-per-open behavior.
+  // opens: mirrors the old fresh-mount-per-open behavior.
   useEffect(() => {
     if (!open) return;
     setPkg("");
@@ -87,7 +89,7 @@ export function DiscoverDialog({
         </>
       }
       title="Discover a Sui protocol"
-      description="Paste a package ID — Rill reads the real ABI on-chain and labels every entry function and parameter."
+      description="Paste a package ID: Rill reads the real ABI on-chain and labels every entry function and parameter."
       contentClassName="max-w-3xl"
     >
       <div className="p-5">
@@ -107,7 +109,11 @@ export function DiscoverDialog({
             disabled={loading || !pkg.trim()}
             className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-foreground text-background px-4 py-2 text-sm font-medium hover:opacity-90 transition disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap"
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />}
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ScanSearch className="h-4 w-4" />
+            )}
             {loading ? "Reading ABI…" : "Introspect"}
           </button>
         </div>
@@ -136,6 +142,25 @@ export function DiscoverDialog({
                 {result.functions.length} functions
               </span>
             </div>
+            {result.functions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-2 text-xs">
+                <span className="mr-auto text-muted-foreground">{picked.size} selected</span>
+                <button
+                  type="button"
+                  className="cursor-pointer text-primary hover:underline"
+                  onClick={() => setPicked(new Set(result.functions.map((fn) => fn.id)))}
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  className="cursor-pointer text-primary hover:underline"
+                  onClick={() => setPicked(new Set())}
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
             {result.functions.length === 0 ? (
               <div className="px-4 py-6 text-sm text-muted-foreground text-center">
                 No public functions found for this package.

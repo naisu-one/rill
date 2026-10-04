@@ -31,3 +31,15 @@ export function pairedForOwner(
     (agent) => agent.owner === owner && agent.network === network && agent.agent !== owner,
   );
 }
+
+/** Auto-select only one verified signer, without replacing a user's explicit selection. */
+export function defaultPairedAgent(
+  agents: PairedAgent[],
+  owner: string,
+  network: SuiNetwork,
+  selected: string,
+): string {
+  if (selected) return selected;
+  const verified = pairedForOwner(agents, owner, network);
+  return verified.length === 1 ? verified[0].agent : "";
+}
