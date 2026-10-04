@@ -103,6 +103,10 @@ export type GrantInput = {
   budgetMist: string;
   perTxMist: string;
   expiresAtMs?: string;
+  /** A DeepBook action's manager and capabilities, as onboarding bound them. */
+  balanceManagerId?: string;
+  tradeCapId?: string;
+  depositCapId?: string;
 };
 
 /** Empty-wallet creation plan. Rules and funding follow through /setup/attach. */

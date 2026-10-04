@@ -36,7 +36,8 @@ export const SWAP_TOKENS = [
 let activeManifest = SUI_NETWORK === "testnet" ? TESTNET_MANIFEST : null;
 
 function requireProtocolManifest() {
-  if (!activeManifest) throw new Error("Load a matching protocol registry before compiling mainnet flows.");
+  if (!activeManifest)
+    throw new Error("Load a matching protocol registry before compiling mainnet flows.");
   return activeManifest;
 }
 
@@ -80,7 +81,8 @@ export function defaultActionConfig(protocolId: string, actionId: string): Actio
       tradeCapId: "",
       depositCapId: "",
       depositSui: "1.1",
-      price: "1",
+      // No default price: the owner sets it, and the publish gate refuses an order without one.
+      price: "",
       quantity: "1",
       isBid: "false",
       payWithDeep: "false",
@@ -227,7 +229,7 @@ export function buildDeepbookOrderFlowConfig(cfg: ActionConfig) {
     tradeCapId: cfg.tradeCapId || "",
     depositCapId: cfg.depositCapId || "",
     depositSui: cfg.depositSui || "0",
-    price: cfg.price || "1",
+    price: cfg.price ?? "",
     quantity: cfg.quantity || "1",
     isBid: cfg.isBid === "true" ? "true" : "false",
     payWithDeep: cfg.payWithDeep === "true" ? "true" : "false",
@@ -243,6 +245,8 @@ export function applyProtocolRegistry(value: unknown) {
     haedal_stake: { ...registry.haedal_stake },
   };
   for (const symbol of ["SUI", "USDC"] as const) {
-    TOKEN_COIN_TYPE[symbol] = registry.cetus_swap.tokens.find((token) => token.symbol === symbol)!.coinType;
+    TOKEN_COIN_TYPE[symbol] = registry.cetus_swap.tokens.find(
+      (token) => token.symbol === symbol,
+    )!.coinType;
   }
 }

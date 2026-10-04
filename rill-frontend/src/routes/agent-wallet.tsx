@@ -296,6 +296,11 @@ function AgentWalletPage() {
       budgetMist: budget,
       perTxMist: perTx,
       expiresAtMs: granted.expiresAtMs,
+      // A DeepBook wallet's grant needs the manager and capabilities onboarding bound it to; the
+      // server refused one without them.
+      balanceManagerId: granted.balanceManagerId,
+      tradeCapId: granted.tradeCapId,
+      depositCapId: granted.depositCapId,
     };
   }
 
@@ -488,12 +493,12 @@ function AgentWalletPage() {
                 id="price"
                 value={price}
                 onChange={(event) => setPrice(event.target.value)}
-                placeholder="leave empty to use twice the live mid price"
+                placeholder="leave empty to use the price the action was published with"
                 className="mt-1.5"
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
-                For DeepBook actions, provide the exact decimal order price when the order book has
-                no live mid price. Swap and stake actions do not need this field.
+                For DeepBook actions, the exact decimal price the order rests at. An ask below the
+                market fills at once. Swap and stake actions do not need this field.
               </p>
             </div>
 

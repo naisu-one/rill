@@ -27,10 +27,11 @@ function guardrailNode(id: string, minValue?: string): Node {
   return { id, type: "guardrail", position: { x: 0, y: 0 }, data };
 }
 
-const deepbookNode = (id = "n1") =>
+const deepbookNode = (id = "n1", price = "2.5") =>
   actionNode(id, "deepbook", "Limit order", "DeepBook", {
     poolKey: "SUI_DBUSDC",
     depositSui: "1.1",
+    price,
   });
 const cetusSwapNode = (id = "n1", amount = "0.1") =>
   actionNode(id, "cetus", "Swap", "Cetus", { tokenIn: "SUI", tokenOut: "USDC", amount });
@@ -40,6 +41,15 @@ describe("computePublishGate", () => {
     const nodes = [deepbookNode()];
     const edges: Edge[] = [];
     expect(computePublishGate(nodes, edges)).toEqual({ publishable: true, reason: null });
+  });
+
+  // The price used to default to 1: an ask at 1 USDC sells SUI at once while the market is above it.
+  it("a DeepBook order without a positive price is not publishable", () => {
+    for (const price of ["", "0", "-1", "abc"]) {
+      const result = computePublishGate([deepbookNode("n1", price)], []);
+      expect(result.publishable).toBe(false);
+      expect(result.reason).toContain("Set the DeepBook order price");
+    }
   });
 
   it("a single Cetus swap flow is publishable (compiles & exports like any supported action)", () => {

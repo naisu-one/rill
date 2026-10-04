@@ -245,7 +245,8 @@ function ActionNodeImpl({ id, data, selected }: NodeProps<ActionNodeData>) {
                   min="0"
                   step="any"
                   className={fieldCls}
-                  value={cfg.price ?? "1"}
+                  value={cfg.price ?? ""}
+                  placeholder="set it"
                   onChange={(e) => patchConfig({ price: e.target.value })}
                 />
               </label>

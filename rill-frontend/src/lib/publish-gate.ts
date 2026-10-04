@@ -19,8 +19,8 @@ export const CAPABILITY_COPY = {
     `Only ${SIMULATE_SUPPORTED_LABEL} actions simulate today. Skipped: ${skipped.join(", ")}`,
   publishEmpty: `Add a ${PUBLISH_SUPPORTED_LABEL} node to compile & export.`,
   publishUnsupported: (labels: string[]) =>
-    `These actions don't compile yet, so the flow can't be exported: ${labels.join(", ")}. `
-    + `Remove them or swap in a supported action.`,
+    `These actions don't compile yet, so the flow can't be exported: ${labels.join(", ")}. ` +
+    `Remove them or swap in a supported action.`,
 } as const;
 
 function actionLabel(data: ActionNodeData): string {
@@ -58,6 +58,21 @@ export function guardrailGateReason(nodes: Node[]): string | null {
     : `Set a minimum value greater than 0 on all ${bad.length} guardrail nodes before simulating or publishing.`;
 }
 
+/** A DeepBook order's price is the owner's to set. It used to default to 1, and an ask at 1 USDC
+ *  sells SUI at once wherever the market is above that (it was near 1.18 when this was found), so
+ *  an unset price would have published an order that fills at a loss. */
+export function deepbookPriceGateReason(nodes: Node[]): string | null {
+  const unpriced = nodes.filter((n) => {
+    if (n.type !== "action") return false;
+    const data = n.data as ActionNodeData;
+    if (data.protocolId !== "deepbook") return false;
+    const price = Number((data.config?.price ?? "").trim() || "NaN");
+    return !(Number.isFinite(price) && price > 0);
+  });
+  if (unpriced.length === 0) return null;
+  return "Set the DeepBook order price before publishing. An ask priced below the market fills at once.";
+}
+
 export type PublishGateResult = { publishable: boolean; reason: string | null };
 
 /** Up-front, truthful publish eligibility computed straight from canvas state —
@@ -66,6 +81,9 @@ export type PublishGateResult = { publishable: boolean; reason: string | null };
 export function computePublishGate(nodes: Node[], edges: Edge[]): PublishGateResult {
   const guardrailReason = guardrailGateReason(nodes);
   if (guardrailReason) return { publishable: false, reason: guardrailReason };
+
+  const priceReason = deepbookPriceGateReason(nodes);
+  if (priceReason) return { publishable: false, reason: priceReason };
 
   if (hasCycle(edges)) {
     return { publishable: false, reason: "This flow has a cycle — remove it before compiling." };
