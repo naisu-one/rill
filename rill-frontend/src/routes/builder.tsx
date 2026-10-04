@@ -814,7 +814,7 @@ function Builder() {
             initial={{ opacity: 0, x: -8 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.35, duration: 0.4, ease: easeOut }}
-            className="absolute top-3 left-3 z-10 rounded-full bg-card/80 backdrop-blur border border-border px-3 py-1.5 text-[11px] text-muted-foreground flex items-center gap-2"
+            className="pointer-events-none absolute bottom-3 left-16 z-10 rounded-full bg-card/80 backdrop-blur border border-border px-3 py-1.5 text-[11px] text-muted-foreground flex items-center gap-2"
           >
             <motion.span
               className="inline-block h-1.5 w-1.5 rounded-full bg-mint-foreground"
