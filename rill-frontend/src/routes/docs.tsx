@@ -33,7 +33,7 @@ function Inline({ text }: { text: string }) {
   parts.push(text.slice(cursor));
   return <>{parts}</>;
 }
-function Markdown({ content }: { content: string }) {
+export function Markdown({ content }: { content: string }) {
   const lines = content.split("\n"),
     blocks: ReactNode[] = [];
   let i = 0;

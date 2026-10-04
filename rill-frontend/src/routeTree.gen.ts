@@ -14,9 +14,11 @@ import { Route as AgentWalletRouteImport } from './routes/agent-wallet'
 import { Route as AuthorizeRouteImport } from './routes/authorize'
 import { Route as BuilderRouteImport } from './routes/builder'
 import { Route as DocsRouteImport } from './routes/docs'
+import { Route as GitbookRouteImport } from './routes/gitbook'
 import { Route as PitchRouteImport } from './routes/pitch'
 import { Route as ProtocolsRouteImport } from './routes/protocols'
 import { Route as DocsPageRouteImport } from './routes/docs_.$page'
+import { Route as GitbookPageRouteImport } from './routes/gitbook_.$page'
 import { Route as PitchPrintRouteImport } from './routes/pitch_.print'
 
 const IndexRoute = IndexRouteImport.update({
@@ -44,6 +46,11 @@ const DocsRoute = DocsRouteImport.update({
   path: '/docs',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GitbookRoute = GitbookRouteImport.update({
+  id: '/gitbook',
+  path: '/gitbook',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PitchRoute = PitchRouteImport.update({
   id: '/pitch',
   path: '/pitch',
@@ -59,6 +66,11 @@ const DocsPageRoute = DocsPageRouteImport.update({
   path: '/docs/$page',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GitbookPageRoute = GitbookPageRouteImport.update({
+  id: '/gitbook_/$page',
+  path: '/gitbook/$page',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PitchPrintRoute = PitchPrintRouteImport.update({
   id: '/pitch_/print',
   path: '/pitch/print',
@@ -71,9 +83,11 @@ export interface FileRoutesByFullPath {
   '/authorize': typeof AuthorizeRoute
   '/builder': typeof BuilderRoute
   '/docs': typeof DocsRoute
+  '/gitbook': typeof GitbookRoute
   '/pitch': typeof PitchRoute
   '/protocols': typeof ProtocolsRoute
   '/docs/$page': typeof DocsPageRoute
+  '/gitbook/$page': typeof GitbookPageRoute
   '/pitch/print': typeof PitchPrintRoute
 }
 export interface FileRoutesByTo {
@@ -82,9 +96,11 @@ export interface FileRoutesByTo {
   '/authorize': typeof AuthorizeRoute
   '/builder': typeof BuilderRoute
   '/docs': typeof DocsRoute
+  '/gitbook': typeof GitbookRoute
   '/pitch': typeof PitchRoute
   '/protocols': typeof ProtocolsRoute
   '/docs/$page': typeof DocsPageRoute
+  '/gitbook/$page': typeof GitbookPageRoute
   '/pitch/print': typeof PitchPrintRoute
 }
 export interface FileRoutesById {
@@ -94,9 +110,11 @@ export interface FileRoutesById {
   '/authorize': typeof AuthorizeRoute
   '/builder': typeof BuilderRoute
   '/docs': typeof DocsRoute
+  '/gitbook': typeof GitbookRoute
   '/pitch': typeof PitchRoute
   '/protocols': typeof ProtocolsRoute
   '/docs_/$page': typeof DocsPageRoute
+  '/gitbook_/$page': typeof GitbookPageRoute
   '/pitch_/print': typeof PitchPrintRoute
 }
 export interface FileRouteTypes {
@@ -107,9 +125,11 @@ export interface FileRouteTypes {
     | '/authorize'
     | '/builder'
     | '/docs'
+    | '/gitbook'
     | '/pitch'
     | '/protocols'
     | '/docs/$page'
+    | '/gitbook/$page'
     | '/pitch/print'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -118,9 +138,11 @@ export interface FileRouteTypes {
     | '/authorize'
     | '/builder'
     | '/docs'
+    | '/gitbook'
     | '/pitch'
     | '/protocols'
     | '/docs/$page'
+    | '/gitbook/$page'
     | '/pitch/print'
   id:
     | '__root__'
@@ -129,9 +151,11 @@ export interface FileRouteTypes {
     | '/authorize'
     | '/builder'
     | '/docs'
+    | '/gitbook'
     | '/pitch'
     | '/protocols'
     | '/docs_/$page'
+    | '/gitbook_/$page'
     | '/pitch_/print'
   fileRoutesById: FileRoutesById
 }
@@ -141,9 +165,11 @@ export interface RootRouteChildren {
   AuthorizeRoute: typeof AuthorizeRoute
   BuilderRoute: typeof BuilderRoute
   DocsRoute: typeof DocsRoute
+  GitbookRoute: typeof GitbookRoute
   PitchRoute: typeof PitchRoute
   ProtocolsRoute: typeof ProtocolsRoute
   DocsPageRoute: typeof DocsPageRoute
+  GitbookPageRoute: typeof GitbookPageRoute
   PitchPrintRoute: typeof PitchPrintRoute
 }
 
@@ -184,6 +210,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DocsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/gitbook': {
+      id: '/gitbook'
+      path: '/gitbook'
+      fullPath: '/gitbook'
+      preLoaderRoute: typeof GitbookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pitch': {
       id: '/pitch'
       path: '/pitch'
@@ -205,6 +238,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DocsPageRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/gitbook_/$page': {
+      id: '/gitbook_/$page'
+      path: '/gitbook/$page'
+      fullPath: '/gitbook/$page'
+      preLoaderRoute: typeof GitbookPageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pitch_/print': {
       id: '/pitch_/print'
       path: '/pitch/print'
@@ -221,9 +261,11 @@ const rootRouteChildren: RootRouteChildren = {
   AuthorizeRoute: AuthorizeRoute,
   BuilderRoute: BuilderRoute,
   DocsRoute: DocsRoute,
+  GitbookRoute: GitbookRoute,
   PitchRoute: PitchRoute,
   ProtocolsRoute: ProtocolsRoute,
   DocsPageRoute: DocsPageRoute,
+  GitbookPageRoute: GitbookPageRoute,
   PitchPrintRoute: PitchPrintRoute,
 }
 export const routeTree = rootRouteImport
