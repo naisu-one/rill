@@ -12,6 +12,7 @@ import { buildFlowGraph } from "@/lib/flow-mapper";
 import { computePublishGate } from "@/lib/publish-gate";
 import { hashFlowGraph } from "@/lib/graph-hash";
 import { rillApi, type PublishResult } from "@/lib/rill-api";
+import { SUI_NETWORK } from "@/lib/sui-network";
 import { useCurrentAccount, useSignPersonalMessage } from "@mysten/dapp-kit";
 import { ensureSession } from "@/lib/rill-session";
 import { useFlowRequest } from "@/lib/use-flow-request";
@@ -48,7 +49,11 @@ const fadeUp = {
  * belonging to an earlier version.
  */
 
-type CopyKind = "mcp" | "config" | "claude" | "codex";
+type CopyKind = "mcp" | "config" | "claude" | "codex" | "setup";
+
+/** The signer reads granted actions from this Studio's API, so the setup line names it: an agent
+ *  told to run `setup --api <Rill API URL>` had no way to know the URL. */
+const signerSetup = `~/.rill/bin/rill-wallet setup --network ${SUI_NETWORK} --as <agent address> --api ${rillApi.baseUrl.replace(/\/api$/, "")}`;
 
 /** One plugin for every published action: install it once and later actions need nothing new. */
 const PLUGIN_INSTALL: { agent: string; kind: CopyKind; command: string }[] = [
@@ -442,6 +447,21 @@ export function ExportDialog({
                       </button>
                     </div>
                   ))}
+                  <p className="mt-2">
+                    Then point its signer at this Studio, with your agent's address. Mainnet signing
+                    stays off until you add <code>--allow-mainnet</code> yourself.
+                  </p>
+                  <div className="mt-1.5 flex items-start gap-2">
+                    <code className="flex-1 whitespace-pre-wrap break-all rounded-lg border border-border bg-foreground/5 px-3 py-2 text-[11px] text-foreground">
+                      {signerSetup}
+                    </code>
+                    <button
+                      onClick={() => copy(signerSetup, "setup")}
+                      className="shrink-0 cursor-pointer pt-2 text-[11px] text-primary hover:underline"
+                    >
+                      {copied === "setup" ? "Copied" : "Copy"}
+                    </button>
+                  </div>
                 </li>
                 <li>
                   Fund a wallet for your agent and sign a grant for this action.{" "}
