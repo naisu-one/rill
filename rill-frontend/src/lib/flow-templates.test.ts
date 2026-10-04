@@ -11,6 +11,7 @@ import {
 import { isGuardrailMinValueValid } from "@/lib/publish-gate";
 import { wireKindFromEdge } from "@/lib/wire-inference";
 import { validateManifest } from "@/lib/capabilities";
+import { decimalToBaseUnits, findToken } from "../../../packages/rill-sdk/src";
 
 /** Same `n_${n}` id scheme Builder's `idRef` counter produces — a fresh,
  *  monotonic counter per call mirrors calling `template.build(makeId)` once
@@ -197,6 +198,37 @@ describe("FLOW_TEMPLATES", () => {
         if (!template.manifest) continue;
         const result = validateManifest(template.manifest);
         expect(result.ok, `${template.id}: ${!result.ok ? result.error : ""}`).toBe(true);
+      }
+    });
+
+    // The server's compiler refuses a manifest whose slippage floor exceeds a swap's own floor,
+    // comparing both in the swap's OUTPUT coin base units, and refuses any coin outside the asset
+    // scope. A preset that breaks either can be published but never funded, which is how the Swap
+    // and Guarded swap presets shipped.
+    it("every template's own swaps pass its slippage floor and asset scope", () => {
+      for (const template of FLOW_TEMPLATES) {
+        if (!template.manifest) continue;
+        const swaps = template
+          .build(makeCounterId({ n: 0 }))
+          .nodes.filter((n) => n.type === "action")
+          .map((n) => n.data as ActionNodeData)
+          .filter((d) => outputCoinTypeFor(d) !== null);
+        for (const rule of template.manifest.rules) {
+          for (const swap of swaps) {
+            const tokenIn = (swap.config?.tokenIn as SwapTokenSymbol) || "SUI";
+            const output = TOKEN_COIN_TYPE[otherSwapToken(tokenIn)];
+            if (rule.kind === "slippage_floor") {
+              const decimals = findToken(output)?.decimals ?? 9;
+              const nodeFloor = decimalToBaseUnits(swap.config?.min_amount_out ?? "0", decimals);
+              expect(BigInt(rule.minOutMist) <= nodeFloor, template.id).toBe(true);
+            }
+            if (rule.kind === "asset_scope") {
+              for (const coin of [TOKEN_COIN_TYPE[tokenIn], output]) {
+                expect(rule.allowedCoinTypes, template.id).toContain(coin);
+              }
+            }
+          }
+        }
       }
     });
 

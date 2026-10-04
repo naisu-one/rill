@@ -17,6 +17,7 @@ import { SiteHeader } from "@/components/site-chrome";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { baseUnitsToDecimal } from "@/lib/capabilities";
 import {
   buildRevokeTx,
   decodeUnsignedPtb,
@@ -559,6 +560,13 @@ function AgentWalletPage() {
                     ? "Check the submitted transaction before downloading your run set. No further signature is needed."
                     : "The next signature attaches capabilities and funds the wallet. If you cancel, it keeps no spending budget. Retry this step to continue."}
                 </p>
+                {!pending.attachment && (
+                  <p className="text-xs text-muted-foreground">
+                    Set when this wallet was created, not by the fields above:{" "}
+                    {baseUnitsToDecimal(pending.input.budgetMist)} SUI budget,{" "}
+                    {baseUnitsToDecimal(pending.input.perTxMist)} SUI per transaction.
+                  </p>
+                )}
                 {account.address !== pending.input.sender && (
                   <p className="text-xs text-amber-600">
                     Reconnect {pending.input.sender} to continue.
@@ -571,6 +579,19 @@ function AgentWalletPage() {
                   {busy ??
                     (pending.attachment ? "Check funding status" : "Configure & fund wallet")}
                 </Button>
+                {/* Only before funding is submitted: the empty wallet holds nothing, so leaving it
+                    unused costs nothing, and without this an owner whose limits the server refused
+                    had no way to enter new ones. */}
+                {!pending.attachment && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setPending(null)}
+                    disabled={Boolean(busy)}
+                    className="ml-2"
+                  >
+                    Start over
+                  </Button>
+                )}
               </div>
             ) : !granted ? (
               <div className="space-y-4">

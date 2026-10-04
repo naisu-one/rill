@@ -3,7 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import { ArrowLeftRight, ListOrdered, PiggyBank, ShieldCheck, Workflow } from "lucide-react";
 import type { ActionNodeData } from "@/components/flow/nodes";
 import { PROTOCOLS } from "@/lib/protocols";
-import { defaultActionConfig, type ActionConfig } from "@/lib/action-config";
+import { defaultActionConfig, TOKEN_COIN_TYPE, type ActionConfig } from "@/lib/action-config";
 import { getActionPorts } from "@/lib/action-ports";
 import { inferWireKind, WIRE_IN, WIRE_OUT, type WireKind } from "@/lib/wire-inference";
 import {
@@ -12,7 +12,6 @@ import {
   perTxRule,
   rateLimitRule,
   recipientAllowlistRule,
-  slippageFloorRule,
   timeWindowRule,
   type CapabilityManifest,
   type CapabilityRule,
@@ -172,7 +171,10 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
     description: "A single Cetus swap — trade SUI for USDC.",
     icon: ArrowLeftRight,
     steps: ["cetus"],
-    manifest: manifestOf(budgetRule("5"), slippageFloorRule("0.05")),
+    // No wallet-level slippage floor: the compiler compares it with the swap's output in the
+    // OUTPUT coin's base units, and a floor typed in SUI against a USDC output reads as 50 USDC
+    // and refuses every swap. The node's own "Min swap output" is the per-swap guard.
+    manifest: manifestOf(budgetRule("5")),
     build: (makeId) => ({
       nodes: [actionNode(makeId(), "cetus", "swap", slot(0))],
       edges: [],
@@ -230,14 +232,16 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
     id: "guarded-swap",
     name: "Guarded swap",
     description:
-      "A Cetus swap bounded by a wallet-level slippage floor (min swap output) plus an asset scope — set once in Capabilities, enforced on every swap.",
+      "A Cetus swap with a firm per-swap minimum output, a per-transaction cap and an asset scope, so the wallet only ever moves SUI and USDC.",
     icon: ShieldCheck,
     steps: ["cetus"],
-    manifest: manifestOf(
-      budgetRule("5"),
-      slippageFloorRule("0.05"),
-      assetScopeRule(WALLET_COIN_TYPE),
-    ),
+    // A getter, read when the template is applied: on mainnet the USDC type arrives with the
+    // protocol registry, after this module has loaded. Both coins are listed because a swap moves
+    // both; scoping to SUI alone refused the template's own swap.
+    get manifest() {
+      const coins = [WALLET_COIN_TYPE, TOKEN_COIN_TYPE.USDC].filter(Boolean).join("\n");
+      return manifestOf(budgetRule("5"), perTxRule("1"), assetScopeRule(coins));
+    },
     build: (makeId) => ({
       nodes: [actionNode(makeId(), "cetus", "swap", slot(0), { min_amount_out: "0.05" })],
       edges: [],
