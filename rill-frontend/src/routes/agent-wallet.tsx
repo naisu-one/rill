@@ -1,3 +1,4 @@
+import { WorkflowExport } from "@/components/agent-wallet/workflow-export";
 import { WalletControl } from "@/components/wallet-control";
 import { formatQuotedAmount } from "@/lib/swap-preview";
 import { SignerPairing } from "@/components/signer-pairing";
@@ -1156,6 +1157,13 @@ function AgentWalletPage() {
                 )}
               </>
             )}
+
+            <WorkflowExport
+              key={account.address}
+              wallets={wallets}
+              owner={account.address}
+              skills={skills}
+            />
 
             {wallets.length > 0 && (
               <section className="mt-10 space-y-4">
