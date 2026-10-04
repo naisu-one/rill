@@ -1,3 +1,4 @@
+import { formatQuotedAmount } from "@/lib/swap-preview";
 import { SignerPairing } from "@/components/signer-pairing";
 import {
   loadGrantState,
@@ -32,6 +33,7 @@ import {
   type PublishedSkillSummary,
   type SetupPlan,
   type SetupInput,
+  type SwapFundingPreview,
 } from "@/lib/rill-api";
 import { ensureSession } from "@/lib/rill-session";
 import { executeSigned, waitForOutcome } from "@/lib/sui-chain";
@@ -90,6 +92,20 @@ function AgentWalletPage() {
   const [restoredOwner, setRestoredOwner] = useState<string | null>(null);
   const [prepared, setPrepared] = useState<PreparedGrant | null>(null);
   const [existingWallet, setExistingWallet] = useState("");
+  const [quotePreview, setQuotePreview] = useState<{
+    key: string;
+    value: SwapFundingPreview | null;
+  } | null>(null);
+  const previewKey = JSON.stringify([
+    ownerAddress,
+    skillId,
+    agent,
+    budgetSui,
+    perTxSui,
+    expiryHours,
+    price,
+  ]);
+  const currentPreview = quotePreview?.key === previewKey ? quotePreview.value : null;
   useEffect(() => {
     const recovered = ownerAddress
       ? loadGrantState(rillApi.baseUrl, ownerAddress)
@@ -139,7 +155,7 @@ function AgentWalletPage() {
   }, [account?.address]);
 
   /** Create an empty wallet first. No funds are granted until rules are attached. */
-  async function grant() {
+  async function grant(previewOnly = false) {
     if (!account || busy || pending) return;
     const budgetMist = suiToMist(budgetSui);
     const perTxMist = suiToMist(perTxSui);
@@ -177,6 +193,18 @@ function AgentWalletPage() {
         const { signature } = await signPersonalMessage({ message });
         return signature;
       });
+      const quoted = await rillApi.previewSetup(input, undefined, session.accessToken);
+      setQuotePreview({ key: previewKey, value: quoted.swapPreview });
+      if (previewOnly) {
+        if (!quoted.swapPreview) toast.message("This action has no single-swap preview.");
+        return;
+      }
+      if (quoted.swapPreview && !quoted.swapPreview.outputFloorMet) {
+        toast.error(
+          "The current quote is below the published minimum output. Increase your input cap or publish a different floor before funding.",
+        );
+        return;
+      }
       const plan = await rillApi.prepareSetup(input, undefined, session.accessToken);
       setBusy("Waiting for your wallet…");
       const result = await signAndExecute({ transaction: decodeUnsignedPtb(plan.setupPtb) });
@@ -548,6 +576,41 @@ function AgentWalletPage() {
               </div>
             </div>
 
+            {currentPreview && (
+              <div
+                className="space-y-2 rounded-xl border border-border p-4"
+                aria-label="Swap funding preview"
+              >
+                <p className="text-sm font-medium">
+                  {currentPreview.outputFloorMet
+                    ? "Current quote meets your minimum"
+                    : "Current quote is below your minimum"}
+                </p>
+                <p className="text-xs">
+                  Input:{" "}
+                  {formatQuotedAmount(currentPreview.inputCoinType, currentPreview.inputBaseUnits)}.
+                  Fee included:{" "}
+                  {formatQuotedAmount(currentPreview.inputCoinType, currentPreview.feeBaseUnits)}.
+                </p>
+                <p className="text-xs">
+                  Expected output:{" "}
+                  {formatQuotedAmount(
+                    currentPreview.outputCoinType,
+                    currentPreview.quotedOutputBaseUnits,
+                  )}
+                  . Published minimum:{" "}
+                  {formatQuotedAmount(
+                    currentPreview.outputCoinType,
+                    currentPreview.minimumOutputBaseUnits,
+                  )}
+                  .
+                </p>
+                <p className="break-all text-xs text-muted-foreground">
+                  Output asset: {currentPreview.outputCoinType}
+                </p>
+                <p className="text-xs text-muted-foreground">{currentPreview.note}</p>
+              </div>
+            )}
             {prepared && (
               <div className="space-y-3 rounded-xl border border-primary/40 p-4">
                 <div className="text-sm font-medium">Review the grant before signing</div>
@@ -629,7 +692,14 @@ function AgentWalletPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                <Button onClick={grant} disabled={Boolean(busy) || !skillId || !agent}>
+                <Button
+                  variant="outline"
+                  onClick={() => void grant(true)}
+                  disabled={Boolean(busy) || !skillId || !agent}
+                >
+                  Preview before funding
+                </Button>
+                <Button onClick={() => void grant()} disabled={Boolean(busy) || !skillId || !agent}>
                   {busy ?? "Create empty wallet"}
                 </Button>
                 <details className="rounded-xl border border-border p-4 text-sm">

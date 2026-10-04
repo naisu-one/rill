@@ -116,7 +116,19 @@ export type GrantInput = {
 };
 
 /** Empty-wallet creation plan. Rules and funding follow through /setup/attach. */
+export type SwapFundingPreview = {
+  inputBaseUnits: string;
+  inputCoinType: string;
+  outputCoinType: string;
+  quotedOutputBaseUnits: string;
+  minimumOutputBaseUnits: string;
+  feeBaseUnits: string;
+  outputFloorMet: boolean;
+  note: string;
+};
+
 export type SetupPlan = {
+  swapPreview?: SwapFundingPreview | null;
   protection?: { adapterPackageId: string; revision: number; owner: string } | null;
   setupPtb: string;
   runSetTemplate: Record<string, unknown>;
@@ -445,6 +457,15 @@ export const rillApi = {
    * Build empty-wallet creation. `sender` is the owner; `agent` is the local signer that will spend.
    * The setup receipt supplies object IDs to attachSetup before any funds enter the wallet.
    */
+  previewSetup(input: SetupInput, signal?: AbortSignal, accessToken?: string) {
+    return post<{ swapPreview: SwapFundingPreview | null }>(
+      "/setup/preview",
+      input,
+      signal,
+      accessToken,
+    );
+  },
+
   prepareSetup(input: SetupInput, signal?: AbortSignal, accessToken?: string) {
     return post<SetupPlan>("/setup/prepare", input, signal, accessToken);
   },
