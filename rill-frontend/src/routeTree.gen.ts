@@ -9,38 +9,19 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as ProtocolsRouteImport } from './routes/protocols'
-import { Route as PitchRouteImport } from './routes/pitch'
-import { Route as DocsRouteImport } from './routes/docs'
-import { Route as BuilderRouteImport } from './routes/builder'
-import { Route as AuthorizeRouteImport } from './routes/authorize'
-import { Route as AgentWalletRouteImport } from './routes/agent-wallet'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AgentWalletRouteImport } from './routes/agent-wallet'
+import { Route as AuthorizeRouteImport } from './routes/authorize'
+import { Route as BuilderRouteImport } from './routes/builder'
+import { Route as DocsRouteImport } from './routes/docs'
+import { Route as PitchRouteImport } from './routes/pitch'
+import { Route as ProtocolsRouteImport } from './routes/protocols'
+import { Route as DocsPageRouteImport } from './routes/docs_.$page'
 import { Route as PitchPrintRouteImport } from './routes/pitch_.print'
 
-const ProtocolsRoute = ProtocolsRouteImport.update({
-  id: '/protocols',
-  path: '/protocols',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PitchRoute = PitchRouteImport.update({
-  id: '/pitch',
-  path: '/pitch',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DocsRoute = DocsRouteImport.update({
-  id: '/docs',
-  path: '/docs',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BuilderRoute = BuilderRouteImport.update({
-  id: '/builder',
-  path: '/builder',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthorizeRoute = AuthorizeRouteImport.update({
-  id: '/authorize',
-  path: '/authorize',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentWalletRoute = AgentWalletRouteImport.update({
@@ -48,9 +29,34 @@ const AgentWalletRoute = AgentWalletRouteImport.update({
   path: '/agent-wallet',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AuthorizeRoute = AuthorizeRouteImport.update({
+  id: '/authorize',
+  path: '/authorize',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BuilderRoute = BuilderRouteImport.update({
+  id: '/builder',
+  path: '/builder',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsRoute = DocsRouteImport.update({
+  id: '/docs',
+  path: '/docs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PitchRoute = PitchRouteImport.update({
+  id: '/pitch',
+  path: '/pitch',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProtocolsRoute = ProtocolsRouteImport.update({
+  id: '/protocols',
+  path: '/protocols',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsPageRoute = DocsPageRouteImport.update({
+  id: '/docs_/$page',
+  path: '/docs/$page',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PitchPrintRoute = PitchPrintRouteImport.update({
@@ -67,6 +73,7 @@ export interface FileRoutesByFullPath {
   '/docs': typeof DocsRoute
   '/pitch': typeof PitchRoute
   '/protocols': typeof ProtocolsRoute
+  '/docs/$page': typeof DocsPageRoute
   '/pitch/print': typeof PitchPrintRoute
 }
 export interface FileRoutesByTo {
@@ -77,6 +84,7 @@ export interface FileRoutesByTo {
   '/docs': typeof DocsRoute
   '/pitch': typeof PitchRoute
   '/protocols': typeof ProtocolsRoute
+  '/docs/$page': typeof DocsPageRoute
   '/pitch/print': typeof PitchPrintRoute
 }
 export interface FileRoutesById {
@@ -88,6 +96,7 @@ export interface FileRoutesById {
   '/docs': typeof DocsRoute
   '/pitch': typeof PitchRoute
   '/protocols': typeof ProtocolsRoute
+  '/docs_/$page': typeof DocsPageRoute
   '/pitch_/print': typeof PitchPrintRoute
 }
 export interface FileRouteTypes {
@@ -100,6 +109,7 @@ export interface FileRouteTypes {
     | '/docs'
     | '/pitch'
     | '/protocols'
+    | '/docs/$page'
     | '/pitch/print'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -110,6 +120,7 @@ export interface FileRouteTypes {
     | '/docs'
     | '/pitch'
     | '/protocols'
+    | '/docs/$page'
     | '/pitch/print'
   id:
     | '__root__'
@@ -120,6 +131,7 @@ export interface FileRouteTypes {
     | '/docs'
     | '/pitch'
     | '/protocols'
+    | '/docs_/$page'
     | '/pitch_/print'
   fileRoutesById: FileRoutesById
 }
@@ -131,44 +143,17 @@ export interface RootRouteChildren {
   DocsRoute: typeof DocsRoute
   PitchRoute: typeof PitchRoute
   ProtocolsRoute: typeof ProtocolsRoute
+  DocsPageRoute: typeof DocsPageRoute
   PitchPrintRoute: typeof PitchPrintRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/protocols': {
-      id: '/protocols'
-      path: '/protocols'
-      fullPath: '/protocols'
-      preLoaderRoute: typeof ProtocolsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/pitch': {
-      id: '/pitch'
-      path: '/pitch'
-      fullPath: '/pitch'
-      preLoaderRoute: typeof PitchRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/docs': {
-      id: '/docs'
-      path: '/docs'
-      fullPath: '/docs'
-      preLoaderRoute: typeof DocsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/builder': {
-      id: '/builder'
-      path: '/builder'
-      fullPath: '/builder'
-      preLoaderRoute: typeof BuilderRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/authorize': {
-      id: '/authorize'
-      path: '/authorize'
-      fullPath: '/authorize'
-      preLoaderRoute: typeof AuthorizeRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agent-wallet': {
@@ -178,11 +163,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentWalletRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/authorize': {
+      id: '/authorize'
+      path: '/authorize'
+      fullPath: '/authorize'
+      preLoaderRoute: typeof AuthorizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/builder': {
+      id: '/builder'
+      path: '/builder'
+      fullPath: '/builder'
+      preLoaderRoute: typeof BuilderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pitch': {
+      id: '/pitch'
+      path: '/pitch'
+      fullPath: '/pitch'
+      preLoaderRoute: typeof PitchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/protocols': {
+      id: '/protocols'
+      path: '/protocols'
+      fullPath: '/protocols'
+      preLoaderRoute: typeof ProtocolsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs_/$page': {
+      id: '/docs_/$page'
+      path: '/docs/$page'
+      fullPath: '/docs/$page'
+      preLoaderRoute: typeof DocsPageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/pitch_/print': {
@@ -203,6 +223,7 @@ const rootRouteChildren: RootRouteChildren = {
   DocsRoute: DocsRoute,
   PitchRoute: PitchRoute,
   ProtocolsRoute: ProtocolsRoute,
+  DocsPageRoute: DocsPageRoute,
   PitchPrintRoute: PitchPrintRoute,
 }
 export const routeTree = rootRouteImport

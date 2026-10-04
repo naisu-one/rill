@@ -103,7 +103,10 @@ function Markdown({ content }: { content: string }) {
   return <div className="space-y-5">{blocks}</div>;
 }
 function DocsPage() {
-  const { page: id } = Route.useSearch();
+  const { page } = Route.useSearch();
+  return <DocsReader id={page} />;
+}
+export function DocsReader({ id }: { id: string }) {
   const page = DOC_PAGES.find((page) => page.id === id)!;
   const [query, setQuery] = useState("");
   const pages = DOC_PAGES.filter((page) => page.title.toLowerCase().includes(query.toLowerCase()));
@@ -130,8 +133,8 @@ function DocsPage() {
         {pages.map((item) => (
           <Link
             key={item.id}
-            to="/docs"
-            search={{ page: item.id }}
+            to="/docs/$page"
+            params={{ page: item.id }}
             className={`block rounded-md px-2 py-2 text-xs ${id === item.id ? "bg-primary/10 font-semibold text-primary" : "text-muted-foreground hover:text-foreground"}`}
           >
             {item.title}
