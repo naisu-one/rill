@@ -5,7 +5,8 @@
   "buildCommand": "bun run build",
   "build": {
     "env": {
-      "VITE_RILL_API_URL": "https://api.rill.naisu.one/api"
+      "VITE_RILL_API_URL": "https://api.rill.rifuki.dev/api",
+      "VITE_SUI_NETWORK": "mainnet"
     }
   }
 }
