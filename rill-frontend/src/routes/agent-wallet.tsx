@@ -533,18 +533,50 @@ function AgentWalletPage() {
     if (!account || busy || account.address !== granted.owner) return;
     setBusy("Waiting for your wallet…");
     try {
-      const result = await signAndExecute({
-        transaction: buildRevokeTx({
+      let transaction;
+      if (granted.balanceManagerId) {
+        const actionId =
+          granted.actionId ??
+          (typeof granted.runSet.actionId === "string" ? granted.runSet.actionId : undefined);
+        if (!actionId) throw new Error("This DeepBook budget is missing its action reference.");
+        setBusy("Preparing order cancellation and recovery…");
+        const session = await ensureSession(account.address, async (message) => {
+          const { signature } = await signPersonalMessage({ message });
+          return signature;
+        });
+        const recovery = await rillApi.prepareRecovery(
+          {
+            skillId: actionId,
+            sender: account.address,
+            walletId: granted.walletId,
+            balanceManagerId: granted.balanceManagerId,
+          },
+          session.accessToken,
+        );
+        if (recovery.owner.toLowerCase() !== account.address.toLowerCase()) {
+          throw new Error("Recovery must return funds to your connected owner wallet.");
+        }
+        transaction = decodeUnsignedPtb(recovery.recoveryPtb);
+      } else {
+        transaction = buildRevokeTx({
           walletPackageId: granted.walletPackageId,
           walletId: granted.walletId,
           owner: account.address,
-        }),
+        });
+      }
+      setBusy("Waiting for your wallet…");
+      const result = await signAndExecute({
+        transaction,
       });
       const receipt = await waitForOutcome(result.digest);
       if (receipt.status !== "success") {
         throw new Error(receipt.error ?? "Revocation did not succeed.");
       }
-      toast.success("Revoked", { description: "The remaining budget is back in your wallet." });
+      toast.success("Revoked", {
+        description: granted.balanceManagerId
+          ? "Orders cancelled. The remaining budget and this action's pool assets are back in your wallet."
+          : "The remaining budget is back in your wallet.",
+      });
       setWallets((list) => list.filter((wallet) => wallet.walletId !== granted.walletId));
       if (lastApproval?.walletId === granted.walletId) setLastApproval(null);
       if (activationWalletId === granted.walletId) {
@@ -1193,6 +1225,8 @@ function AgentWalletPage() {
                       </div>
                       <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
                         Revoke stops the agent and returns the vault's unused funds to your wallet.
+                        {granted.balanceManagerId &&
+                          " It also cancels orders in this action's pools and returns those pool assets."}
                         The amounts above are approved limits, not a live remaining balance.
                       </p>
                       <details className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">

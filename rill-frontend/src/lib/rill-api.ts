@@ -484,6 +484,18 @@ export const rillApi = {
     return post<SetupPlan>("/setup/prepare", input, signal, accessToken);
   },
 
+  prepareRecovery(
+    input: { skillId: string; sender: string; walletId: string; balanceManagerId: string },
+    accessToken: string,
+  ) {
+    return post<{ recoveryPtb: string; owner: string; submitted: false }>(
+      "/setup/recover",
+      input,
+      undefined,
+      accessToken,
+    );
+  },
+
   /** The grant for running `actionId` from an already funded wallet, and the exact text to sign. */
   prepareGrant(input: GrantInput, signal?: AbortSignal, accessToken?: string) {
     return post<PreparedGrant>("/grants/prepare", input, signal, accessToken);
