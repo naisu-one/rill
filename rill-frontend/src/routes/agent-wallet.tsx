@@ -10,7 +10,6 @@ import {
   useCurrentAccount,
   useSignAndExecuteTransaction,
   useSignPersonalMessage,
-  useSuiClient,
 } from "@mysten/dapp-kit";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -23,7 +22,6 @@ import {
   decodeUnsignedPtb,
   harvestSetupObjects,
   isSelfOnboarding,
-  type ObjectChange,
 } from "@/lib/agent-wallet-tx";
 import {
   rillApi,
@@ -34,6 +32,7 @@ import {
   type SetupInput,
 } from "@/lib/rill-api";
 import { ensureSession } from "@/lib/rill-session";
+import { executeSigned, waitForOutcome } from "@/lib/sui-chain";
 
 /**
  * Grant an agent a bounded on-chain wallet — the one place a human approves anything in Rill.
@@ -71,8 +70,9 @@ function suiToMist(value: string): bigint | null {
 function AgentWalletPage() {
   const account = useCurrentAccount();
   const ownerAddress = account?.address;
-  const client = useSuiClient();
-  const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
+  // The wallet signs; submission and confirmation go over gRPC, because public fullnodes no longer
+  // serve the JSON-RPC that dapp-kit would otherwise use. See lib/sui-chain.ts.
+  const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction({ execute: executeSigned });
   const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
 
   const [skills, setSkills] = useState<PublishedSkillSummary[]>([]);
@@ -198,20 +198,12 @@ function AgentWalletPage() {
     }
     setBusy("Confirming empty wallet…");
     try {
-      const confirmed = await client.waitForTransaction({
-        digest: pending.digest,
-        options: { showObjectChanges: true, showEffects: true },
-      });
-      if (confirmed.effects?.status.status !== "success") {
-        if (confirmed.effects?.status.status === "failure") setPending(null);
-        throw new Error(
-          confirmed.effects?.status.error ?? "The empty-wallet transaction did not succeed.",
-        );
+      const confirmed = await waitForOutcome(pending.digest);
+      if (confirmed.status !== "success") {
+        setPending(null);
+        throw new Error(confirmed.error ?? "The empty-wallet transaction did not succeed.");
       }
-      const objects = harvestSetupObjects(
-        confirmed.objectChanges as ObjectChange[] | undefined,
-        pending.plan.requiresTradeCap,
-      );
+      const objects = harvestSetupObjects(confirmed.objectChanges, pending.plan.requiresTradeCap);
       if (objects.missing.length > 0) {
         throw new Error(`Setup ${pending.digest} did not return: ${objects.missing.join(", ")}.`);
       }
@@ -248,17 +240,10 @@ function AgentWalletPage() {
         setPending({ ...pending, attachment });
       }
       setBusy("Confirming rules and funding…");
-      const receipt = await client.waitForTransaction({
-        digest: attachment.digest,
-        options: { showEffects: true },
-      });
-      if (receipt.effects?.status.status !== "success") {
-        if (receipt.effects?.status.status === "failure") {
-          setPending({ ...pending, attachment: undefined });
-        }
-        throw new Error(
-          receipt.effects?.status.error ?? "Funding is not confirmed yet. Check its status again.",
-        );
+      const receipt = await waitForOutcome(attachment.digest);
+      if (receipt.status !== "success") {
+        setPending({ ...pending, attachment: undefined });
+        throw new Error(receipt.error ?? "Funding did not succeed.");
       }
       setGranted({
         walletId: objects.walletId!,
@@ -407,12 +392,9 @@ function AgentWalletPage() {
           owner: account.address,
         }),
       });
-      const receipt = await client.waitForTransaction({
-        digest: result.digest,
-        options: { showEffects: true },
-      });
-      if (receipt.effects?.status.status !== "success") {
-        throw new Error(receipt.effects?.status.error ?? "Revocation is not confirmed yet.");
+      const receipt = await waitForOutcome(result.digest);
+      if (receipt.status !== "success") {
+        throw new Error(receipt.error ?? "Revocation did not succeed.");
       }
       toast.success("Revoked", { description: "The remaining budget is back in your wallet." });
       setGranted(null);
