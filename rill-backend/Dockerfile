@@ -1,4 +1,4 @@
-# Built from the monorepo root (see build-backend.yaml `context: .`).
+# Built from the monorepo root: `docker build -f rill-backend/Dockerfile .`
 # The backend imports packages/rill-sdk source directly (../../../packages/rill-sdk/src),
 # so the image needs the workspace layout, and the install must use the root
 # workspace lockfile — which is the one CI keeps consistent. The previous
