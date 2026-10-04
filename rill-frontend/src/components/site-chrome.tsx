@@ -25,7 +25,6 @@ export function SiteHeader() {
               { to: "/builder", label: "Builder" },
               { to: "/agent-wallet", label: "Agents" },
               { to: "/protocols", label: "Protocols" },
-              { to: "/docs", label: "Docs" },
             ] as const
           ).map((item) => (
             <Link
@@ -37,6 +36,14 @@ export function SiteHeader() {
               {item.label}
             </Link>
           ))}
+          <a
+            href="https://rifuki.gitbook.io/rill/"
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-lg px-3 py-2 font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          >
+            Docs
+          </a>
         </nav>
         <span className="ml-auto sm:ml-2">
           <WalletControl />
