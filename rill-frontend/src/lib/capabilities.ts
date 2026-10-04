@@ -254,9 +254,23 @@ export function validateManifest(manifest: CapabilityManifest): ManifestValidati
 
 /** All declared caps (label + value + enforcement) for a manifest, in rule order — template cards
  *  render these so a preset advertises its FULL suggested capability set with values (e.g. "Budget
- *  5 SUI"), not just the rule names. Same SDK projection the composer preview uses. */
+ *  5 SUI"), not just the rule names. Same SDK projection the composer preview uses.
+ *
+ *  Rendered rule by rule, because the canvas renders the manifest the composer is still editing:
+ *  "0." on its way to "0.05" is not an amount yet, the SDK's declaration (which expects a validated
+ *  manifest) threw on it, and the throw took the whole builder page down mid-keystroke. A rule that
+ *  does not render yet shows as incomplete instead. */
 export function manifestCaps(manifest: CapabilityManifest): CapabilityDeclarationCap[] {
-  return toDeclaration(manifest).caps;
+  return manifest.rules.map((rule) => {
+    try {
+      const [cap] = toDeclaration({ walletCoinType: manifest.walletCoinType, rules: [rule] }).caps;
+      if (cap) return cap;
+    } catch {
+      // Falls through to the incomplete cap below.
+    }
+    const meta = RULE_KIND_META[rule.kind];
+    return { label: meta.label, value: "incomplete", enforcement: meta.enforcement };
+  });
 }
 
 export type { CapabilityDeclarationCap, CapabilityManifest, CapabilityRule, RuleKind };

@@ -9,6 +9,7 @@ import {
   budgetRule,
   emptyManifest,
   listToText,
+  manifestCaps,
   msToDatetimeLocal,
   parseListInput,
   perTxRule,
@@ -223,5 +224,25 @@ describe("RULE_KIND_META enforcement matches the SDK's own toDeclaration split",
     expect(preFlight).toEqual(
       ["protocol_scope", "slippage_floor", "asset_scope", "recipient_allowlist"].sort(),
     );
+  });
+});
+
+// The canvas renders the manifest while the composer is mid-keystroke. "0." threw out of the SDK's
+// declaration and took the whole builder page down when the owner typed a floor of 0.05.
+describe("manifestCaps on a manifest still being typed", () => {
+  it("shows an unfinished amount as incomplete instead of throwing", () => {
+    const caps = manifestCaps({
+      walletCoinType: "0x2::sui::SUI",
+      rules: [
+        { kind: "budget", totalMist: "5000000000" },
+        { kind: "slippage_floor", minOutMist: "0.", coinType: TOKEN_COIN_TYPE.USDC },
+        { kind: "per_tx", maxMist: "0." },
+      ],
+    });
+    expect(caps).toEqual([
+      { label: "Budget", value: "5 SUI", enforcement: "on-chain" },
+      { label: "Min swap output", value: "incomplete", enforcement: "pre-flight" },
+      { label: "Per-tx max", value: "incomplete", enforcement: "on-chain" },
+    ]);
   });
 });
