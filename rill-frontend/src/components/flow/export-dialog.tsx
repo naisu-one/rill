@@ -4,6 +4,7 @@ import gsap from "gsap";
 import { toast } from "sonner";
 import { Check, Loader2, Server, FileText, Sparkles } from "lucide-react";
 import type { Edge, Node } from "reactflow";
+import { Link } from "@tanstack/react-router";
 import { DialogShell } from "@/components/flow/dialog-shell";
 import { FlowWarningsBanner } from "@/components/flow/flow-warnings";
 import type { ActionNodeData } from "@/components/flow/nodes";
@@ -46,6 +47,22 @@ const fadeUp = {
  * presents the flow as unpublished and labels any previously-shown URL as
  * belonging to an earlier version.
  */
+
+type CopyKind = "mcp" | "config" | "claude" | "codex";
+
+/** One plugin for every published action: install it once and later actions need nothing new. */
+const PLUGIN_INSTALL: { agent: string; kind: CopyKind; command: string }[] = [
+  {
+    agent: "Claude Code",
+    kind: "claude",
+    command: "/plugin marketplace add rifuki/rill\n/plugin install rill@rill",
+  },
+  {
+    agent: "Codex",
+    kind: "codex",
+    command: "codex plugin marketplace add rifuki/rill\ncodex plugin add rill@rill",
+  },
+];
 export function ExportDialog({
   nodes,
   edges,
@@ -84,7 +101,7 @@ export function ExportDialog({
   }, [nodes, edges, manifest]);
 
   const [storedRecord, setStoredRecord] = useState<StoredPublishRecord | null>(null);
-  const [copied, setCopied] = useState<"mcp" | "config" | null>(null);
+  const [copied, setCopied] = useState<CopyKind | null>(null);
   const mcpBoxRef = useRef<HTMLDivElement>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The hash a publish request was fired FOR, captured at click time — used to
@@ -224,7 +241,7 @@ export function ExportDialog({
     );
   }, [published]);
 
-  const copy = async (text: string, kind: "mcp" | "config") => {
+  const copy = async (text: string, kind: CopyKind) => {
     await navigator.clipboard.writeText(text);
     setCopied(kind);
     if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
@@ -239,12 +256,12 @@ export function ExportDialog({
   const title = publishing
     ? "Publishing flow…"
     : published
-      ? "MCP server ready"
+      ? "Published. Now grant it"
       : "Review & publish";
   const description = publishing
     ? "Publishing action metadata and registering the bounded Rill tools."
     : published
-      ? "Copy the URL below into Claude Code, Cursor, or Thiny — not a browser link."
+      ? "Your agent runs this action through the Rill plugin, from a wallet you fund and a grant you sign."
       : "Nothing is sent until you click Publish below.";
 
   return (
@@ -313,10 +330,10 @@ export function ExportDialog({
                   <Server className="h-3.5 w-3.5" />
                 </span>
                 <div className="text-[11px] leading-relaxed">
-                  <div className="font-medium text-foreground">MCP server</div>
+                  <div className="font-medium text-foreground">An action for your agent</div>
                   <p className="text-muted-foreground">
-                    A live endpoint agents call — every build is bounded by your wallet
-                    capabilities.
+                    It runs once you grant it from a wallet you fund, and only within that wallet's
+                    limits.
                   </p>
                 </div>
               </div>
@@ -327,7 +344,7 @@ export function ExportDialog({
                 <div className="text-[11px] leading-relaxed">
                   <div className="font-medium text-foreground">SKILL.md + agent instructions</div>
                   <p className="text-muted-foreground">
-                    Paste-ready docs any agent reads to wire up the same MCP URL.
+                    Readable docs for the action, its inputs and its limits.
                   </p>
                 </div>
               </div>
@@ -402,87 +419,128 @@ export function ExportDialog({
               </span>
             </motion.div>
 
-            <motion.div variants={fadeUp}>
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                MCP server URL
-              </label>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {published.ownerMcpUrl
-                  ? "Your connector. It serves every action you publish — add it once and anything you publish later shows up without reconnecting."
-                  : "This action's own link. Sign in with your wallet before publishing to get one connector URL for everything instead."}
-              </p>
-              <div ref={mcpBoxRef} className="mt-1.5 flex gap-2 rounded-xl">
-                <code className="flex-1 rounded-lg border border-border bg-foreground/5 px-3 py-2.5 text-xs break-all">
-                  {connectUrl}
-                </code>
-                <motion.button
-                  whileHover={{ scale: 1.04 }}
-                  whileTap={{ scale: 0.96 }}
-                  onClick={() => copy(connectUrl, "mcp")}
-                  className="shrink-0 cursor-pointer rounded-full bg-foreground text-background px-4 py-2 text-sm font-medium"
-                >
-                  <AnimatePresence mode="wait">
-                    {copied === "mcp" ? (
-                      <motion.span
-                        key="copied"
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -6 }}
-                        className="inline-flex items-center gap-1"
-                      >
-                        <Check className="h-3.5 w-3.5" /> Copied
-                      </motion.span>
-                    ) : (
-                      <motion.span
-                        key="copy"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                      >
-                        Copy URL
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                </motion.button>
-              </div>
-            </motion.div>
-
             <motion.div
               variants={fadeUp}
-              className="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm space-y-2"
+              className="space-y-3 rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm"
             >
-              <p className="font-medium">How to use</p>
-              <ol className="list-decimal list-inside text-muted-foreground space-y-1 text-xs">
+              <p className="font-medium">Next</p>
+              <ol className="list-decimal list-inside space-y-3 text-xs text-muted-foreground">
                 <li>
-                  Copy the MCP URL above and add it as{" "}
-                  <code className="text-foreground">rill-actions</code>
+                  Install the Rill plugin in your agent, once. It runs the signer on your machine;
+                  the agent's key never leaves it.
+                  {PLUGIN_INSTALL.map(({ agent, kind, command }) => (
+                    <div key={kind} className="mt-1.5 flex items-start gap-2">
+                      <span className="w-20 shrink-0 pt-2 text-[11px]">{agent}</span>
+                      <code className="flex-1 whitespace-pre-wrap break-all rounded-lg border border-border bg-foreground/5 px-3 py-2 text-[11px] text-foreground">
+                        {command}
+                      </code>
+                      <button
+                        onClick={() => copy(command, kind)}
+                        className="shrink-0 cursor-pointer pt-2 text-[11px] text-primary hover:underline"
+                      >
+                        {copied === kind ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                  ))}
                 </li>
                 <li>
-                  Call <code className="text-foreground">list_actions</code>, then{" "}
-                  <code className="text-foreground">describe_action</code>
+                  Fund a wallet for your agent and sign a grant for this action.{" "}
+                  <Link to="/agent-wallet" className="text-primary hover:underline">
+                    Open Agent wallet
+                  </Link>
                 </li>
                 <li>
-                  Call <code className="text-foreground">build_action</code> with public wallet IDs
-                  and runtime params → get an unsigned ExecutionEnvelope
+                  Ask your agent to list its Rill actions and run this one. It can only do what the
+                  grant and the wallet allow.
                 </li>
               </ol>
             </motion.div>
 
-            <motion.div variants={fadeUp}>
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Claude Code config (optional)
-              </label>
-              <pre className="mt-1.5 rounded-lg border border-border bg-foreground/5 p-3 text-[11px] font-mono overflow-auto max-h-36">
-                {claudeConfig}
-              </pre>
-              <motion.button
-                whileHover={{ x: 2 }}
-                onClick={() => copy(claudeConfig, "config")}
-                className="mt-2 cursor-pointer text-xs text-primary hover:underline"
-              >
-                {copied === "config" ? "Copied!" : "Copy config JSON"}
-              </motion.button>
-            </motion.div>
+            <motion.details variants={fadeUp} className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">Advanced: the keyless builder over MCP</summary>
+              <p className="mt-2">
+                Builds unsigned transactions for an agent that signs elsewhere. It holds no keys and
+                cannot spend; the plugin above is what runs granted actions.
+              </p>
+              <div className="mt-3">
+                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  MCP server URL
+                </label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {published.ownerMcpUrl
+                    ? "Your connector. It serves every action you publish — add it once and anything you publish later shows up without reconnecting."
+                    : "This action's own link. Sign in with your wallet before publishing to get one connector URL for everything instead."}
+                </p>
+                <div ref={mcpBoxRef} className="mt-1.5 flex gap-2 rounded-xl">
+                  <code className="flex-1 rounded-lg border border-border bg-foreground/5 px-3 py-2.5 text-xs break-all">
+                    {connectUrl}
+                  </code>
+                  <motion.button
+                    whileHover={{ scale: 1.04 }}
+                    whileTap={{ scale: 0.96 }}
+                    onClick={() => copy(connectUrl, "mcp")}
+                    className="shrink-0 cursor-pointer rounded-full bg-foreground text-background px-4 py-2 text-sm font-medium"
+                  >
+                    <AnimatePresence mode="wait">
+                      {copied === "mcp" ? (
+                        <motion.span
+                          key="copied"
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -6 }}
+                          className="inline-flex items-center gap-1"
+                        >
+                          <Check className="h-3.5 w-3.5" /> Copied
+                        </motion.span>
+                      ) : (
+                        <motion.span
+                          key="copy"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                        >
+                          Copy URL
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                  </motion.button>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm space-y-2">
+                <p className="font-medium">How to use</p>
+                <ol className="list-decimal list-inside text-muted-foreground space-y-1 text-xs">
+                  <li>
+                    Copy the MCP URL above and add it as{" "}
+                    <code className="text-foreground">rill-actions</code>
+                  </li>
+                  <li>
+                    Call <code className="text-foreground">list_actions</code>, then{" "}
+                    <code className="text-foreground">describe_action</code>
+                  </li>
+                  <li>
+                    Call <code className="text-foreground">build_action</code> with public wallet
+                    IDs and runtime params → get an unsigned ExecutionEnvelope
+                  </li>
+                </ol>
+              </div>
+
+              <div className="mt-3">
+                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Claude Code config (optional)
+                </label>
+                <pre className="mt-1.5 rounded-lg border border-border bg-foreground/5 p-3 text-[11px] font-mono overflow-auto max-h-36">
+                  {claudeConfig}
+                </pre>
+                <motion.button
+                  whileHover={{ x: 2 }}
+                  onClick={() => copy(claudeConfig, "config")}
+                  className="mt-2 cursor-pointer text-xs text-primary hover:underline"
+                >
+                  {copied === "config" ? "Copied!" : "Copy config JSON"}
+                </motion.button>
+              </div>
+            </motion.details>
 
             {published.warnings.length > 0 && (
               <motion.p variants={fadeUp} className="text-xs text-amber-700 dark:text-amber-400">
