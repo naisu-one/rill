@@ -1,83 +1,80 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { motion } from "framer-motion";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Check } from "lucide-react";
 import { SiteHeader, SiteFooter } from "@/components/site-chrome";
-import { PROTOCOLS } from "@/lib/protocols";
-
+import { ProtocolLogo } from "@/components/flow/protocol-logo";
+import { STUDIO_PROTOCOLS } from "@/lib/supported-protocols";
 export const Route = createFileRoute("/protocols")({
-  head: () => ({
-    meta: [
-      { title: "Protocols — Rill" },
-      { name: "description", content: "Browse Sui protocols available as nodes in Rill." },
-      { property: "og:title", content: "Protocols — Rill" },
-      { property: "og:description", content: "Browse Sui protocols available as nodes in Rill." },
-    ],
-  }),
+  head: () => ({ meta: [{ title: "Supported protocols | Rill" }] }),
   component: ProtocolsPage,
 });
-
-const colorMap: Record<string, string> = {
-  mint: "bg-mint text-mint-foreground",
-  peach: "bg-peach text-peach-foreground",
-  sky: "bg-sky text-sky-foreground",
-  lilac: "bg-lilac text-lilac-foreground",
-};
-
 function ProtocolsPage() {
   return (
     <div className="min-h-screen">
       <SiteHeader />
-      <section className="mx-auto max-w-6xl px-6 pt-14 pb-10">
-        <div className="text-xs uppercase tracking-widest text-muted-foreground">Library</div>
-        <h1 className="mt-2 font-display text-5xl tracking-tight">Sui protocols, agent-ready.</h1>
-        <p className="mt-4 max-w-2xl text-muted-foreground text-lg leading-relaxed">
-          Every protocol exposes a set of typed actions. Drop them into the builder and Rill handles the boring parts —
-          transactions, signing, validation, and the agent-facing schema.
+      <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
+        <p className="text-xs font-semibold uppercase tracking-widest text-primary">Integrations</p>
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight">Supported protocols</h1>
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          These actions can be built, published, and granted from Studio. The catalog reflects the
+          current compiler, not planned integrations.
         </p>
-
-        <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {PROTOCOLS.map((p, i) => (
-            <motion.div
-              key={p.id}
-              initial={{ opacity: 0, y: 14 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-60px" }}
-              transition={{ delay: i * 0.04, duration: 0.5 }}
-              className="rounded-2xl border border-border/70 bg-card p-5 shadow-[var(--shadow-soft)] hover:shadow-[var(--shadow-float)] transition"
+        <div className="mt-8 overflow-hidden rounded-xl border border-border bg-card">
+          <div className="hidden grid-cols-[1fr_1fr_160px] gap-4 border-b border-border bg-muted/40 px-5 py-3 text-xs font-medium text-muted-foreground sm:grid">
+            <span>Protocol</span>
+            <span>Available action</span>
+            <span>Status</span>
+          </div>
+          {STUDIO_PROTOCOLS.map((protocol) => (
+            <div
+              key={protocol.id}
+              className="grid items-center gap-4 border-b border-border px-5 py-5 last:border-0 sm:grid-cols-[1fr_1fr_160px]"
             >
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <ProtocolLogo protocolId={protocol.id} name={protocol.name} className="h-8 w-8" />
                 <div>
-                  <div className={`inline-flex items-center gap-1.5 rounded-full ${colorMap[p.color]} px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wider`}>
-                    {p.category}
-                  </div>
-                  <div className="mt-3 text-xl font-semibold">{p.name}</div>
-                  <div className="text-sm text-muted-foreground mt-0.5">{p.tagline}</div>
-                </div>
-                <div className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-md font-mono">
-                  {p.actions.length} actions
+                  <p className="text-sm font-semibold">{protocol.name}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{protocol.category}</p>
                 </div>
               </div>
-              <div className="mt-4 space-y-1.5">
-                {p.actions.slice(0, 3).map((a) => (
-                  <div key={a.id} className="flex items-center justify-between text-sm">
-                    <span className="text-foreground/80">{a.name}</span>
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{a.inputs.length} inputs</span>
-                  </div>
-                ))}
+              <div>
+                <p className="text-sm">{protocol.actions[0].name}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {protocol.id === "cetus"
+                    ? "SUI-funded swap flows"
+                    : protocol.id === "haedal"
+                      ? "Stake SUI and receive haSUI"
+                      : "Requires a funded BalanceManager"}
+                </p>
               </div>
-            </motion.div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="inline-flex items-center gap-1 text-xs text-primary">
+                  <Check className="h-3.5 w-3.5" />
+                  Available
+                </span>
+                <Link
+                  to="/builder"
+                  aria-label={`Build with ${protocol.name}`}
+                  className="text-primary"
+                >
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+            </div>
           ))}
         </div>
-
-        <div className="mt-14 flex justify-center">
-          <Link
-            to="/builder"
-            className="inline-flex items-center gap-2 rounded-full bg-foreground text-background px-5 py-2.5 text-sm font-medium hover:opacity-90 transition"
-          >
-            Start composing <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
-      </section>
+        <section className="mt-8 border-t border-border pt-6">
+          <h2 className="text-sm font-semibold">What about other protocols?</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            Navi, Scallop, BlueMove, Pyth, SuiNS, and Wormhole are not executable Studio
+            integrations yet. Discover / Import can inspect public contract functions; importing an
+            ABI does not make an unsupported action executable.
+          </p>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Signer tools also cover bounded sends, portfolio reads, and instant haSUI redemption.
+            Those are separate from the Studio action catalog.
+          </p>
+        </section>
+      </main>
       <SiteFooter />
     </div>
   );

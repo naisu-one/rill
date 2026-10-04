@@ -1,3 +1,4 @@
+import { WalletControl } from "@/components/wallet-control";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import gsap from "gsap";
@@ -14,7 +15,7 @@ import { parentPublication } from "@/lib/publish-lineage";
 import { hashFlowGraph } from "@/lib/graph-hash";
 import { rillApi, type PublishResult } from "@/lib/rill-api";
 import { SUI_NETWORK } from "@/lib/sui-network";
-import { ConnectButton, useCurrentAccount, useSignPersonalMessage } from "@mysten/dapp-kit";
+import { useCurrentAccount, useSignPersonalMessage } from "@mysten/dapp-kit";
 import { ensureSession } from "@/lib/rill-session";
 import { useFlowRequest } from "@/lib/use-flow-request";
 import { validateManifest, type CapabilityManifest } from "@/lib/capabilities";
@@ -410,7 +411,7 @@ export function ExportDialog({
                   Connect your owner wallet to publish. This keeps the action in your account so you
                   can grant it to an agent from Agent Wallet.
                 </p>
-                <ConnectButton />
+                <WalletControl />
               </div>
             ) : (
               <motion.button
@@ -506,8 +507,12 @@ export function ExportDialog({
                 </li>
                 <li>
                   Fund a wallet for your agent and sign a grant for this action.{" "}
-                  <Link to="/agent-wallet" className="text-primary hover:underline">
-                    Open Agent wallet
+                  <Link
+                    to="/agent-wallet"
+                    search={{ action: published.skillId }}
+                    className="text-primary hover:underline"
+                  >
+                    Approve this action’s budget
                   </Link>
                 </li>
                 <li>

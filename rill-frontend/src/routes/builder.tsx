@@ -1,3 +1,4 @@
+import { STUDIO_PROTOCOLS } from "@/lib/supported-protocols";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
@@ -41,7 +42,7 @@ import {
   GuardrailNode,
   type ActionNodeData,
 } from "@/components/flow/nodes";
-import { PROTOCOLS, BACKEND_PROTOCOL_IDS, type Protocol } from "@/lib/protocols";
+import { PROTOCOLS, type Protocol } from "@/lib/protocols";
 import { DiscoverDialog } from "@/components/flow/discover-dialog";
 import { ExportDialog } from "@/components/flow/export-dialog";
 import { TemplateDialog } from "@/components/flow/template-dialog";
@@ -191,7 +192,8 @@ function Builder() {
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        const reason = error instanceof Error ? error.message : "Could not load the protocol registry.";
+        const reason =
+          error instanceof Error ? error.message : "Could not load the protocol registry.";
         setRegistryReason(reason);
         toast.error(reason);
       });
@@ -326,9 +328,10 @@ function Builder() {
   );
 
   const publishGate = useMemo(
-    () => registryReason
-      ? { publishable: false, reason: registryReason }
-      : computePublishGate(nodes, edges),
+    () =>
+      registryReason
+        ? { publishable: false, reason: registryReason }
+        : computePublishGate(nodes, edges),
     [nodes, edges, registryReason],
   );
 
@@ -376,18 +379,7 @@ function Builder() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const supported = PROTOCOLS.filter((p) => BACKEND_PROTOCOL_IDS.has(p.id))
-      .sort((a, b) => (a.id === "cetus" ? -1 : b.id === "cetus" ? 1 : 0))
-      .map((p) => ({
-        ...p,
-        actions: p.actions.filter(
-          (a) =>
-            (p.id === "cetus" && a.id === "swap") ||
-            (p.id === "haedal" && a.id === "stake") ||
-            (p.id === "deepbook" && a.id === "limit_order"),
-        ),
-      }));
-
+    const supported = STUDIO_PROTOCOLS;
     if (!q) return supported;
 
     return supported
@@ -663,7 +655,7 @@ function Builder() {
                         <br />
                         2. Wire <strong>out → in</strong> — solid = coin chain, dashed = sequence
                         <br />
-                        3. <strong>Simulate</strong> → <strong>Compile & export</strong>
+                        3. <strong>Preview</strong> → <strong>Publish action</strong>
                       </p>
                     </PopoverContent>
                   </Popover>
@@ -743,19 +735,6 @@ function Builder() {
 
         {/* Canvas — fixed viewport; pan/zoom inside ReactFlow only */}
         <main className="flex-1 min-h-0 relative overflow-hidden">
-          <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <motion.div
-              className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-mint/20 blur-3xl"
-              animate={{ x: [0, 24, 0], y: [0, 16, 0], scale: [1, 1.08, 1] }}
-              transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
-            />
-            <motion.div
-              className="absolute bottom-0 left-1/4 h-64 w-64 rounded-full bg-lilac/15 blur-3xl"
-              animate={{ x: [0, -20, 0], y: [0, -12, 0], scale: [1, 1.05, 1] }}
-              transition={{ duration: 18, repeat: Infinity, ease: "easeInOut", delay: 2 }}
-            />
-          </div>
-
           <motion.div
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -764,11 +743,12 @@ function Builder() {
           >
             <div className="flex flex-wrap items-center gap-2 justify-end">
               <div
-                title="Every flow compiles into exactly one Programmable Transaction Block — batching is automatic, not a step you add."
+                title="Actions included in this flow."
                 className="inline-flex items-center gap-1.5 rounded-full bg-card/60 backdrop-blur border border-border/70 px-3 py-2 text-[11px] font-medium text-muted-foreground"
               >
-                <Layers className="h-3.5 w-3.5" /> 1 PTB ·{" "}
-                <span className="font-mono text-foreground/80">{actionNodeCount}</span> moves
+                <Layers className="h-3.5 w-3.5" />
+                <span className="text-foreground/80">{actionNodeCount}</span>{" "}
+                {actionNodeCount === 1 ? "action" : "actions"}
               </div>
               {(
                 [
@@ -779,12 +759,12 @@ function Builder() {
                     badge: undefined,
                   },
                   {
-                    label: "Capabilities",
+                    label: "Budget & permissions",
                     icon: ShieldCheck,
                     onClick: () => setCapabilitiesOpen(true),
                     badge: manifest.rules.length > 0 ? manifest.rules.length : undefined,
                   },
-                  { label: "Simulate", icon: Play, onClick: openSimulate, badge: undefined },
+                  { label: "Preview", icon: Play, onClick: openSimulate, badge: undefined },
                 ] as const
               ).map(({ label, icon: Icon, onClick, badge }) => (
                 <motion.button
@@ -793,7 +773,7 @@ function Builder() {
                   whileTap={{ scale: 0.96 }}
                   transition={{ type: "spring", stiffness: 480, damping: 22 }}
                   onClick={onClick}
-                  className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-card/90 backdrop-blur border border-border px-3.5 py-2 text-sm font-medium shadow-[var(--shadow-soft)]"
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-card/90 backdrop-blur border border-border px-3.5 py-2 text-sm font-medium shadow-[var(--shadow-soft)]"
                 >
                   <Icon className="h-4 w-4" /> {label}
                   {badge !== undefined && (
@@ -810,13 +790,13 @@ function Builder() {
                 onClick={openExport}
                 aria-disabled={!publishGate.publishable}
                 aria-describedby={!publishGate.publishable ? "publish-gate-reason" : undefined}
-                className={`inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-sm font-medium shadow-[var(--shadow-float)] transition-colors ${
+                className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium shadow-sm transition-colors ${
                   publishGate.publishable
                     ? "cursor-pointer bg-foreground text-background"
                     : "cursor-not-allowed bg-foreground/50 text-background/80"
                 }`}
               >
-                <Download className="h-4 w-4" /> Compile & export
+                <Download className="h-4 w-4" /> Publish action
               </motion.button>
             </div>
             {!publishGate.publishable && publishGate.reason && (
@@ -1017,6 +997,7 @@ function ProtocolGroup({
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={() => onAdd(p, a.id)}
+                    aria-label={`Add ${a.name}`}
                     className="opacity-0 group-hover:opacity-100 transition cursor-pointer text-[11px] rounded-md border border-border bg-background px-2 py-1"
                   >
                     Add

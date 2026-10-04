@@ -155,6 +155,16 @@ export type SetupInput = {
   price?: string;
 };
 
+export type SetupOptions = {
+  budgetMist: string;
+  perTxMist: string;
+  budgetLimitMist: string | null;
+  perTxLimitMist: string | null;
+  requiresOrderPrice: boolean;
+  restrictions: { label: string; value: string; enforcement: string }[];
+  note: string;
+};
+
 export type AttachSetupInput = SetupInput & {
   walletId: string;
   agentCapId: string;
@@ -457,6 +467,10 @@ export const rillApi = {
    * Build empty-wallet creation. `sender` is the owner; `agent` is the local signer that will spend.
    * The setup receipt supplies object IDs to attachSetup before any funds enter the wallet.
    */
+  setupOptions(skillId: string, accessToken: string, signal?: AbortSignal) {
+    return post<SetupOptions>("/setup/options", { skillId }, signal, accessToken);
+  },
+
   previewSetup(input: SetupInput, signal?: AbortSignal, accessToken?: string) {
     return post<{ swapPreview: SwapFundingPreview | null }>(
       "/setup/preview",

@@ -317,7 +317,7 @@ function AgentAmountNote({ onOpenCapabilities }: { onOpenCapabilities: () => voi
         onClick={onOpenCapabilities}
         className="nodrag cursor-pointer font-medium text-foreground underline decoration-dotted underline-offset-2 hover:text-primary"
       >
-        Capabilities
+        Budget rules
       </button>{" "}
       card.
     </p>
@@ -353,7 +353,9 @@ function CapabilitiesNodeImpl() {
         <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-background/20">
           <ShieldCheck className="h-3.5 w-3.5" strokeWidth={2.25} />
         </span>
-        <span className="text-[11px] font-semibold uppercase tracking-wider">Capabilities</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wider">
+          Budget & permissions
+        </span>
         <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-background/25 px-1.5 py-0.5 text-[9px] font-medium">
           <Globe className="h-2.5 w-2.5" /> wallet · global
         </span>
@@ -404,7 +406,7 @@ function CapabilitiesNodeImpl() {
           onClick={openCapabilities}
           className="nodrag mt-2.5 cursor-pointer text-[10px] font-medium text-primary hover:underline"
         >
-          Edit capabilities →
+          Edit budget →
         </button>
       </div>
 

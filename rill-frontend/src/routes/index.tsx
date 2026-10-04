@@ -1,237 +1,151 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { motion } from "framer-motion";
-import { useEffect, useRef } from "react";
-import gsap from "gsap";
-import ReactFlow, { Background, BackgroundVariant } from "reactflow";
-import { ArrowRight, Workflow, Code2, Terminal, Boxes, Plug } from "lucide-react";
+import { ArrowRight, Bot, Check, ShieldCheck, Workflow, Wallet, Zap } from "lucide-react";
 import { SiteHeader, SiteFooter } from "@/components/site-chrome";
-import { SUI_NETWORK } from "@/lib/sui-network";
-import { ActionNode, TriggerNode, OutputNode } from "@/components/flow/nodes";
-
-export const Route = createFileRoute("/")({
-  component: Landing,
-});
-
-const nodeTypes = { action: ActionNode, trigger: TriggerNode, output: OutputNode };
-
-const demoNodes = [
-  { id: "t", type: "trigger", position: { x: 0, y: 80 }, data: { label: "Agent prompt", sub: "“Rebalance my portfolio”" } },
-  {
-    id: "a1",
-    type: "action",
-    position: { x: 240, y: 0 },
-    data: {
-      protocol: "Pyth", protocolId: "pyth", action: "Get price feed", color: "sky",
-      description: "Read latest SUI/USD price.",
-      inputs: [{ key: "feed", label: "Feed", type: "string" }],
-    },
-  },
-  {
-    id: "a2",
-    type: "action",
-    position: { x: 240, y: 180 },
-    data: {
-      protocol: "Cetus", protocolId: "cetus", action: "Swap tokens", color: "mint",
-      description: "Swap USDC → SUI.",
-      inputs: [
-        { key: "tokenIn", label: "In", type: "token" },
-        { key: "tokenOut", label: "Out", type: "token" },
-      ],
-    },
-  },
-  {
-    id: "a3",
-    type: "action",
-    position: { x: 520, y: 180 },
-    data: {
-      protocol: "Haedal", protocolId: "haedal", action: "Stake SUI", color: "lilac",
-      description: "Stake the swapped SUI.",
-      inputs: [{ key: "amount", label: "Amount", type: "number" }],
-    },
-  },
-  { id: "o", type: "output", position: { x: 800, y: 100 }, data: { label: "MCP Server", sub: "Ready for any agent" } },
+import { ProtocolLogo } from "@/components/flow/protocol-logo";
+export const Route = createFileRoute("/")({ component: Landing });
+const actions = [
+  { protocol: "cetus", name: "Swap", description: "Trade SUI and USDC with Cetus." },
+  { protocol: "haedal", name: "Stake", description: "Stake SUI with Haedal." },
+  { protocol: "deepbook", name: "Place an order", description: "Create a DeepBook limit order." },
 ];
-
-const demoEdges = [
-  { id: "e1", source: "t", target: "a1", animated: true },
-  { id: "e2", source: "t", target: "a2", animated: true },
-  { id: "e3", source: "a1", target: "a2", animated: true },
-  { id: "e4", source: "a2", target: "a3", animated: true },
-  { id: "e5", source: "a3", target: "o", animated: true },
-];
-
 function Landing() {
-  const headlineRef = useRef<HTMLHeadingElement>(null);
-
-  useEffect(() => {
-    if (!headlineRef.current) return;
-    const words = headlineRef.current.querySelectorAll<HTMLElement>("[data-word]");
-    gsap.fromTo(
-      words,
-      { y: 24, opacity: 0, filter: "blur(8px)" },
-      { y: 0, opacity: 1, filter: "blur(0px)", duration: 0.9, stagger: 0.06, ease: "power3.out" }
-    );
-  }, []);
-
   return (
     <div className="min-h-screen">
       <SiteHeader />
-
-      {/* HERO */}
-      <section className="relative mx-auto max-w-6xl px-6 pt-16 pb-10">
-        <h1
-          ref={headlineRef}
-          className="font-display text-5xl md:text-7xl leading-[1.02] tracking-tight max-w-4xl"
-        >
-          {"Make any Sui dApp usable by AI agents."
-            .split(" ")
-            .map((w, i) => (
-              <span key={i} data-word className="inline-block mr-[0.25em]">
-                {w}
+      <main className="mx-auto max-w-6xl px-4 sm:px-6">
+        <section className="grid items-center gap-10 py-12 lg:grid-cols-[1.1fr_1fr] lg:gap-16 lg:py-20">
+          <div>
+            <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs font-medium text-primary">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Sui actions with spending limits
+            </span>
+            <h1 className="mt-6 max-w-xl text-4xl font-semibold leading-[1.1] tracking-tight sm:text-5xl lg:text-6xl">
+              Give your agent an action.
+              <br />
+              <span className="text-primary">Keep control of the budget.</span>
+            </h1>
+            <p className="mt-6 max-w-lg text-base leading-relaxed text-muted-foreground">
+              Build a Sui workflow, connect your agent, and approve what it can spend. Your wallet
+              keeps the power to revoke access and reclaim unused funds.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Link
+                to="/builder"
+                className="inline-flex items-center gap-2 rounded-xl bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:opacity-90"
+              >
+                Build an action
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link
+                to="/agent-wallet"
+                search={{ action: undefined }}
+                className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-5 py-3 text-sm font-medium transition hover:border-primary/40"
+              >
+                Manage agents
+                <Bot className="h-4 w-4" />
+              </Link>
+            </div>
+            <div className="mt-6 flex flex-wrap gap-4 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <Check className="h-3.5 w-3.5 text-primary" />
+                Your wallet stays yours
               </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Check className="h-3.5 w-3.5 text-primary" />
+                Agent signs locally
+              </span>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-8">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold">From workflow to execution</h2>
+              <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+                You approve
+              </span>
+            </div>
+            <ol className="mt-7 space-y-0">
+              {[
+                {
+                  Icon: Workflow,
+                  title: "Build an action",
+                  body: "Choose actions, connect them, and publish your flow.",
+                },
+                {
+                  Icon: Bot,
+                  title: "Choose your agent",
+                  body: "Connect its own signer once and reuse it.",
+                },
+                {
+                  Icon: Wallet,
+                  title: "Set a spending budget",
+                  body: "Approve a total limit, a per-run cap, and an expiry.",
+                },
+                {
+                  Icon: Zap,
+                  title: "Let your agent run",
+                  body: "Use the Rill plugin to execute the approved action.",
+                },
+              ].map(({ Icon, title, body }, i) => (
+                <li key={title} className="relative flex gap-4 pb-7 last:pb-0">
+                  {i < 3 && (
+                    <span className="absolute left-4 top-9 h-[calc(100%-2.25rem)] w-px bg-border" />
+                  )}
+                  <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-primary">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <h3 className="text-sm font-semibold">{title}</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{body}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-7 flex gap-2 rounded-xl bg-primary/5 p-3 text-xs leading-relaxed text-primary">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+              You can stop the agent and recover the vault's unused funds.
+            </div>
+          </div>
+        </section>
+        <section className="border-t border-border py-10">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-primary">
+                Ready to build
+              </p>
+              <h2 className="mt-2 text-xl font-semibold">Start with a supported action</h2>
+            </div>
+            <Link
+              to="/protocols"
+              className="inline-flex items-center gap-2 text-sm font-medium text-primary"
+            >
+              Explore protocols
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            {actions.map((action) => (
+              <Link
+                key={action.protocol}
+                to="/builder"
+                className="group rounded-xl border border-border bg-card p-5 transition hover:border-primary/40 hover:shadow-sm"
+              >
+                <div className="flex items-center justify-between">
+                  <ProtocolLogo
+                    protocolId={action.protocol}
+                    name={action.protocol}
+                    className="h-8 w-8"
+                  />
+                  <ArrowRight className="h-4 w-4 text-muted-foreground transition group-hover:text-primary" />
+                </div>
+                <h3 className="mt-5 text-sm font-semibold">{action.name}</h3>
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                  {action.description}
+                </p>
+              </Link>
             ))}
-        </h1>
-
-        <motion.p
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6, duration: 0.6 }}
-          className="mt-6 max-w-2xl text-lg text-muted-foreground leading-relaxed"
-        >
-          Rill is a visual flow builder for Sui protocols. Drag actions, wire them together,
-          and publish a hosted <span className="text-foreground font-medium">MCP server</span> any agent
-          (Claude, Cursor, Thiny) can call — grounded, simulated, and signed safely on-chain.
-        </motion.p>
-
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.8, duration: 0.6 }}
-          className="mt-7 flex flex-wrap items-center gap-3"
-        >
-          <Link
-            to="/builder"
-            className="group inline-flex items-center gap-2 rounded-full bg-foreground text-background px-5 py-2.5 text-sm font-medium hover:opacity-90 transition"
-          >
-            Start building
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-          </Link>
-          <Link
-            to="/protocols"
-            className="inline-flex items-center gap-2 rounded-full border border-border bg-card/70 backdrop-blur px-5 py-2.5 text-sm font-medium hover:bg-card transition"
-          >
-            Browse protocols
-          </Link>
-        </motion.div>
-
-        {/* Demo flow */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1, duration: 0.8 }}
-          className="mt-14 rounded-3xl border border-border/70 bg-card/60 backdrop-blur shadow-[var(--shadow-float)] overflow-hidden"
-        >
-          <div className="flex items-center gap-1.5 px-4 py-2.5 border-b border-border/70 bg-background/40">
-            <span className="h-2.5 w-2.5 rounded-full bg-peach" />
-            <span className="h-2.5 w-2.5 rounded-full bg-mint" />
-            <span className="h-2.5 w-2.5 rounded-full bg-sky" />
-            <span className="ml-3 text-xs text-muted-foreground font-mono">flow · portfolio-rebalance</span>
           </div>
-          <div style={{ height: 380 }}>
-            <ReactFlow
-              nodes={demoNodes as any}
-              edges={demoEdges}
-              nodeTypes={nodeTypes as any}
-              fitView
-              fitViewOptions={{ padding: 0.2 }}
-              proOptions={{ hideAttribution: true }}
-              nodesDraggable={false}
-              nodesConnectable={false}
-              elementsSelectable={false}
-              panOnDrag={false}
-              zoomOnScroll={false}
-              zoomOnPinch={false}
-              zoomOnDoubleClick={false}
-            >
-              <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="oklch(0.85 0.02 90)" />
-            </ReactFlow>
-          </div>
-        </motion.div>
-      </section>
-
-      {/* HOW IT WORKS */}
-      <section className="mx-auto max-w-6xl px-6 mt-24">
-        <div className="max-w-2xl">
-          <div className="text-xs uppercase tracking-widest text-muted-foreground">How it works</div>
-          <h2 className="mt-2 text-4xl font-display tracking-tight">Three steps from protocol to agent.</h2>
-        </div>
-        <div className="mt-10 grid md:grid-cols-3 gap-5">
-          {[
-            { icon: Boxes, color: "bg-mint text-mint-foreground", title: "Compose", body: "Pick protocol nodes — Cetus, Navi, Haedal, Pyth, SuiNS — and wire them on a canvas." },
-            { icon: Workflow, color: "bg-peach text-peach-foreground", title: "Configure", body: "Set inputs, validation rules, and which steps the agent decides vs. you pin." },
-            { icon: Plug, color: "bg-lilac text-lilac-foreground", title: "Export", body: "Get an MCP server, an agent skill, or a CLI tool — ready to drop into Claude or any model." },
-          ].map((s, i) => (
-            <motion.div
-              key={s.title}
-              initial={{ opacity: 0, y: 16 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-80px" }}
-              transition={{ delay: i * 0.08, duration: 0.5 }}
-              className="rounded-2xl bg-card border border-border/70 p-6 shadow-[var(--shadow-soft)]"
-            >
-              <div className={`inline-flex h-10 w-10 items-center justify-center rounded-xl ${s.color}`}>
-                <s.icon className="h-5 w-5" />
-              </div>
-              <div className="mt-4 text-lg font-semibold">{s.title}</div>
-              <p className="mt-1 text-sm text-muted-foreground leading-relaxed">{s.body}</p>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-      {/* EXPORTS */}
-      <section className="mx-auto max-w-6xl px-6 mt-24">
-        <div className="grid md:grid-cols-3 gap-5">
-          {[
-            { icon: Plug, label: "MCP Server", code: "Add the hosted MCP URL to Claude / Cursor / Thiny" },
-            { icon: Terminal, label: "Simulate first", code: "POST /api/simulate → devInspect on Sui" },
-            { icon: Code2, label: "Unsigned PTB", code: "returns a base64 PTB — Thiny / wallet signs" },
-          ].map((e) => (
-            <motion.div
-              key={e.label}
-              initial={{ opacity: 0, y: 10 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="rounded-2xl border border-border/70 bg-card p-5 shadow-[var(--shadow-soft)]"
-            >
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <e.icon className="h-4 w-4 text-primary" /> {e.label}
-              </div>
-              <pre className="mt-3 rounded-lg bg-foreground/5 text-foreground/80 px-3 py-2 text-xs font-mono overflow-x-auto">
-                $ {e.code}
-              </pre>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="mx-auto max-w-6xl px-6 mt-24">
-        <div className="rounded-3xl border border-border/70 bg-card/70 backdrop-blur p-10 md:p-14 text-center shadow-[var(--shadow-float)] overflow-hidden relative">
-          <div className="absolute inset-0 -z-10 opacity-70" style={{ backgroundImage: "var(--gradient-aura)" }} />
-          <h2 className="text-4xl md:text-5xl font-display tracking-tight">Wire your first flow.</h2>
-          <p className="mt-3 text-muted-foreground max-w-xl mx-auto">
-            Configured for Sui {SUI_NETWORK}. No wallet needed to design — connect when you're ready to ship.
-          </p>
-          <Link
-            to="/builder"
-            className="mt-7 inline-flex items-center gap-2 rounded-full bg-foreground text-background px-6 py-3 text-sm font-medium hover:opacity-90 transition"
-          >
-            Open the builder <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
-      </section>
-
+        </section>
+      </main>
       <SiteFooter />
     </div>
   );

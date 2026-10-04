@@ -10,6 +10,7 @@ import {
   pairingCommand,
   samePairingContext,
 } from "@/lib/signer-pairing";
+import { shortAddress } from "@/lib/setup-navigation";
 import { SUI_NETWORK } from "@/lib/sui-network";
 
 type Props = {
@@ -18,8 +19,16 @@ type Props = {
   agent: string;
   session: () => Promise<string>;
   onSelect: (agent: string) => void;
+  onConnected?: (record: PairedAgent) => void;
 };
-export function SignerPairing({ owner, initialAgents, agent, session, onSelect }: Props) {
+export function SignerPairing({
+  owner,
+  initialAgents,
+  agent,
+  session,
+  onSelect,
+  onConnected,
+}: Props) {
   const [agents, setAgents] = useState<PairedAgent[]>(initialAgents);
   const [pending, setPending] = useState<(PreparedPairing & { agent: string }) | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,16 +58,15 @@ export function SignerPairing({ owner, initialAgents, agent, session, onSelect }
     }
   }
   return (
-    <section className="mt-3 space-y-3 rounded-md border border-border p-3">
-      <p className="text-sm font-medium">Agent signer</p>
+    <section className="space-y-4">
+      <p className="text-sm font-medium">Available agents</p>
       <p className="text-xs text-muted-foreground">
-        The agent holds this signer wallet. You choose how much its vault can spend and can revoke
-        access anytime. Connect it once, then reuse it for your actions.
+        The private key stays in your agent's runtime. Choose its connected signer below.
       </p>
       {agent && (
         <p className="text-xs">
           {selectedVerified
-            ? "Connected agent. Its signer is verified for your wallet and network."
+            ? "Verified for your wallet and network."
             : "This signer has not been paired yet. Prove it before approving a budget."}
         </p>
       )}
@@ -83,7 +91,7 @@ export function SignerPairing({ owner, initialAgents, agent, session, onSelect }
             })
           }
         >
-          {busy ? "Loading…" : "Load connected agents"}
+          {busy ? "Loading…" : "Refresh agents"}
         </Button>
       </div>
       {verified.length > 0 && (
@@ -96,7 +104,7 @@ export function SignerPairing({ owner, initialAgents, agent, session, onSelect }
           <option value="">Choose a connected agent</option>
           {verified.map((record) => (
             <option key={record.agent} value={record.agent}>
-              {record.agent}
+              Connected signer · {shortAddress(record.agent)}
             </option>
           ))}
         </select>
@@ -170,6 +178,7 @@ export function SignerPairing({ owner, initialAgents, agent, session, onSelect }
                   ),
                   paired,
                 ]);
+                onConnected?.(paired);
                 onSelect(paired.agent);
                 setPending(null);
                 toast.success("Agent signer paired. Configure its vault permission next.");

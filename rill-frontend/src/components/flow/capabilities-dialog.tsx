@@ -448,7 +448,7 @@ export function CapabilitiesDialog({
           <ShieldCheck className="h-3 w-3" /> Wallet-level capability manifest
         </>
       }
-      title="Capabilities"
+      title="Budget & permissions"
       description="Compose the agent's on-chain + pre-flight limits."
       contentClassName="max-w-3xl"
     >
