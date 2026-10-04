@@ -468,7 +468,7 @@ export function ExportDialog({
                 </label>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {published.ownerMcpUrl
-                    ? "Your connector. It serves every action you publish — add it once and anything you publish later shows up without reconnecting."
+                    ? "Your connector. It serves every action you publish: add it once and anything you publish later shows up without reconnecting."
                     : "This action's own link. Sign in with your wallet before publishing to get one connector URL for everything instead."}
                 </p>
                 <div ref={mcpBoxRef} className="mt-1.5 flex gap-2 rounded-xl">
