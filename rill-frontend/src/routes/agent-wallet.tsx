@@ -1226,7 +1226,7 @@ function AgentWalletPage() {
                       <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
                         Revoke stops the agent and returns the vault's unused funds to your wallet.
                         {granted.balanceManagerId &&
-                          " It also cancels orders in this action's pools and returns those pool assets."}
+                          " It also cancels orders in this action's pools and returns those pool assets. "}
                         The amounts above are approved limits, not a live remaining balance.
                       </p>
                       <details className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">

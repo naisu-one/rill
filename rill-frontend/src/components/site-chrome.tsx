@@ -37,7 +37,7 @@ export function SiteHeader() {
             </Link>
           ))}
           <a
-            href="https://rifuki.gitbook.io/rill/"
+            href="https://rillforagents.gitbook.io/rill/getting-started"
             target="_blank"
             rel="noreferrer"
             className="rounded-lg px-3 py-2 font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
