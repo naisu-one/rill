@@ -20,7 +20,7 @@ export function SetupJourney({
 }) {
   const index = SETUP_STEPS.indexOf(step);
   return (
-    <div className="grid gap-6 md:grid-cols-[210px_minmax(0,1fr)]">
+    <div className="grid gap-6 md:grid-cols-[180px_minmax(0,1fr)]">
       <nav
         aria-label="Budget setup steps"
         className="flex gap-2 overflow-x-auto md:flex-col md:gap-3"
@@ -43,11 +43,11 @@ export function SetupJourney({
           </button>
         ))}
       </nav>
-      <section className="min-w-0 rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-8">
+      <section className="min-w-0 py-2 md:border-l md:border-border md:pl-6">
         <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
           Step {index + 1} of 4
         </p>
-        <h2 className="mt-2 text-2xl font-semibold tracking-tight">{titles[step]}</h2>
+        <h2 className="mt-2 text-xl font-semibold tracking-tight">{titles[step]}</h2>
         <div className="mt-6 space-y-5">{children}</div>
       </section>
     </div>

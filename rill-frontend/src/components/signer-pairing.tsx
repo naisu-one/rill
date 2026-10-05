@@ -20,6 +20,7 @@ type Props = {
   session: () => Promise<string>;
   onSelect: (agent: string) => void;
   onConnected?: (record: PairedAgent) => void;
+  connectOnly?: boolean;
 };
 export function SignerPairing({
   owner,
@@ -28,6 +29,7 @@ export function SignerPairing({
   session,
   onSelect,
   onConnected,
+  connectOnly = false,
 }: Props) {
   const [agents, setAgents] = useState<PairedAgent[]>(initialAgents);
   const [pending, setPending] = useState<(PreparedPairing & { agent: string }) | null>(null);
@@ -59,58 +61,67 @@ export function SignerPairing({
   }
   return (
     <section className="space-y-4">
-      <p className="text-sm font-medium">Available agents</p>
-      <p className="text-xs text-muted-foreground">
-        The private key stays in your agent's runtime. Choose its connected signer below.
-      </p>
-      {agent && (
-        <p className="text-xs">
-          {selectedVerified
-            ? "Verified for your wallet and network."
-            : "This signer has not been paired yet. Prove it before approving a budget."}
-        </p>
-      )}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={busy}
-          onClick={() =>
-            void perform(async (current) => {
-              const token = await session();
-              if (!current()) return;
-              const records = await rillApi.pairedAgents(token);
-              if (current()) {
-                setAgents(records);
-                const selected = defaultPairedAgent(records, owner, SUI_NETWORK, agent);
-                if (selected) onSelect(selected);
-                if (pairedForOwner(records, owner, SUI_NETWORK).length === 0) {
-                  toast.message("No connected agent yet. Open Connect a new agent below.");
-                }
+      {!connectOnly && (
+        <>
+          <p className="text-sm font-medium">Available agents</p>
+          <p className="text-xs text-muted-foreground">
+            The private key stays in your agent's runtime. Choose its connected signer below.
+          </p>
+          {agent && (
+            <p className="text-xs">
+              {selectedVerified
+                ? "Verified for your wallet and network."
+                : "This signer has not been paired yet. Prove it before approving a budget."}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() =>
+                void perform(async (current) => {
+                  const token = await session();
+                  if (!current()) return;
+                  const records = await rillApi.pairedAgents(token);
+                  if (current()) {
+                    setAgents(records);
+                    const selected = defaultPairedAgent(records, owner, SUI_NETWORK, agent);
+                    if (selected) onSelect(selected);
+                    if (pairedForOwner(records, owner, SUI_NETWORK).length === 0) {
+                      toast.message("No connected agent yet. Open Connect a new agent below.");
+                    }
+                  }
+                })
               }
-            })
-          }
-        >
-          {busy ? "Loading…" : "Refresh agents"}
-        </Button>
-      </div>
-      {verified.length > 0 && (
-        <select
-          aria-label="Paired agent signer"
-          className="w-full rounded-md border border-input bg-background p-2 text-xs"
-          value={selectedVerified ? agent : ""}
-          onChange={(event) => onSelect(event.target.value)}
-        >
-          <option value="">Choose a connected agent</option>
-          {verified.map((record) => (
-            <option key={record.agent} value={record.agent}>
-              Connected signer · {shortAddress(record.agent)}
-            </option>
-          ))}
-        </select>
+            >
+              {busy ? "Loading…" : "Refresh agents"}
+            </Button>
+          </div>
+          {verified.length > 0 && (
+            <select
+              aria-label="Paired agent signer"
+              className="w-full rounded-md border border-input bg-background p-2 text-xs"
+              value={selectedVerified ? agent : ""}
+              onChange={(event) => onSelect(event.target.value)}
+            >
+              <option value="">Choose a connected agent</option>
+              {verified.map((record) => (
+                <option key={record.agent} value={record.agent}>
+                  Connected signer · {shortAddress(record.agent)}
+                </option>
+              ))}
+            </select>
+          )}
+        </>
       )}
-      <details className="rounded-md border border-border p-3">
-        <summary className="cursor-pointer text-xs font-medium">Connect a new agent</summary>
+      <details
+        open={connectOnly || undefined}
+        className={connectOnly ? "" : "rounded-md border border-border p-3"}
+      >
+        <summary className={connectOnly ? "hidden" : "cursor-pointer text-xs font-medium"}>
+          Connect a new agent
+        </summary>
         <div className="mt-3 space-y-3">
           <p className="text-xs text-muted-foreground">
             Ask your agent for its Rill signer address, or run <code>rill-wallet address</code> in
@@ -139,7 +150,7 @@ export function SignerPairing({
               })
             }
           >
-            Prepare pairing
+            {busy && !pending ? "Preparing pairing…" : "Prepare pairing"}
           </Button>
         </div>
       </details>
@@ -185,7 +196,7 @@ export function SignerPairing({
               })
             }
           >
-            Check proof and confirm pairing
+            {busy ? "Checking proof…" : "Check proof and confirm pairing"}
           </Button>
         </div>
       )}

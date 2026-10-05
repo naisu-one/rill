@@ -1,3 +1,11 @@
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { pairedForOwner } from "@/lib/signer-pairing";
 import { WorkflowExport } from "@/components/agent-wallet/workflow-export";
 import { WalletControl } from "@/components/wallet-control";
 import { formatQuotedAmount } from "@/lib/swap-preview";
@@ -54,7 +62,7 @@ import {
 } from "@/lib/rill-api";
 import { defaultPairedAgent } from "@/lib/signer-pairing";
 import { SUI_NETWORK } from "@/lib/sui-network";
-import { ensureSession } from "@/lib/rill-session";
+import { loadSession, ensureSession } from "@/lib/rill-session";
 import { executeSigned, waitForOutcome } from "@/lib/sui-chain";
 
 /**
@@ -100,7 +108,12 @@ function AgentWalletPage() {
   const processedRequestedAction = useRef<string | undefined>(undefined);
   const [step, setStep] = useState<SetupStep>("action");
   const [hasLoaded, setHasLoaded] = useState(false);
-  const [creating, setCreating] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [workspaceView, setWorkspaceView] = useState<"agents" | "budgets" | "workflows">("agents");
+  const [connecting, setConnecting] = useState(false);
+  const [pairingAgent, setPairingAgent] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const autoLoadedOwner = useRef<string | null>(null);
   const [lastApproval, setLastApproval] = useState<{
     owner: string;
     actionName: string;
@@ -144,7 +157,7 @@ function AgentWalletPage() {
     setWallets(recovered.wallets);
     const unfinished = recovered.wallets.find((wallet) => !wallet.grantRevision);
     setActivationWalletId(unfinished?.walletId ?? null);
-    setCreating(Boolean(recovered.pending || unfinished || recovered.wallets.length === 0));
+    setCreating(Boolean(recovered.pending || unfinished));
     setRestoredOwner(ownerAddress ?? null);
   }, [ownerAddress]);
   useEffect(() => {
@@ -160,47 +173,68 @@ function AgentWalletPage() {
 
   /** Load the signed-in address's own skills. Requires a session, since an ownerless listing would
    *  show skills this address cannot bind a wallet for. */
-  const loadSkills = useCallback(async () => {
-    if (!account || busy) return;
-    setBusy("Signing in…");
-    try {
-      const session = await ensureSession(account.address, async (message) => {
-        const { signature } = await signPersonalMessage({ message });
-        return signature;
-      });
-      const [actions, pairing] = await Promise.allSettled([
-        rillApi.skills(session.accessToken),
-        rillApi.pairedAgents(session.accessToken),
-      ]);
-      if (currentOwner.current !== account.address) return;
-      if (actions.status === "rejected") throw actions.reason;
-      const list = actions.value;
-      if (pairing.status === "fulfilled") {
-        setPairedAgents(pairing.value);
-        setAgent((selected) =>
-          defaultPairedAgent(pairing.value, account.address, SUI_NETWORK, selected),
-        );
+  const loadSkills = useCallback(
+    async (existingToken?: string) => {
+      if (!account || busy) return;
+      setBusy("Verifying wallet…");
+      setLoadError(null);
+      try {
+        // An automatic restore uses only the cached token. It never opens a signing prompt.
+        const token =
+          existingToken ??
+          (
+            await ensureSession(account.address, async (message) => {
+              const { signature } = await signPersonalMessage({ message });
+              return signature;
+            })
+          ).accessToken;
+        const [actions, pairing] = await Promise.allSettled([
+          rillApi.skills(token),
+          rillApi.pairedAgents(token),
+        ]);
+        if (currentOwner.current !== account.address) return;
+        if (actions.status === "rejected") throw actions.reason;
+        const list = actions.value;
+        if (pairing.status === "rejected") {
+          setLoadError("Could not load connected agents. Refresh to try again.");
+        }
+        if (pairing.status === "fulfilled") {
+          setPairedAgents(pairing.value);
+          setAgent((selected) =>
+            defaultPairedAgent(pairing.value, account.address, SUI_NETWORK, selected),
+          );
+        }
+        setSkills(list);
+        setHasLoaded(true);
+        if (requestedAction && !list.some((skill) => skill.id === requestedAction)) {
+          setSkillId("");
+          toast.error(
+            "This action is not available to your wallet. Choose one of your own actions.",
+          );
+        } else if (list.length > 0) {
+          setSkillId((current) => requestedAction || current || list[0].id);
+        }
+        if (list.length === 0)
+          toast.message("No published actions yet", {
+            description: "Publish a flow in the builder first: a wallet is granted per action.",
+          });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not load your workspace.";
+        setLoadError(message);
+        toast.error(message);
+      } finally {
+        setBusy(null);
       }
-      setSkills(list);
-      setHasLoaded(true);
-      if (requestedAction && !list.some((skill) => skill.id === requestedAction)) {
-        setSkillId("");
-        toast.error("This action is not available to your wallet. Choose one of your own actions.");
-      } else if (list.length > 0) {
-        setSkillId((current) => requestedAction || current || list[0].id);
-      }
-      if (list.length === 0)
-        toast.message("No published actions yet", {
-          description: "Publish a flow in the builder first: a wallet is granted per action.",
-        });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not load your actions.");
-    } finally {
-      setBusy(null);
-    }
-  }, [account, busy, signPersonalMessage, requestedAction]);
+    },
+    [account, busy, signPersonalMessage, requestedAction],
+  );
 
   useEffect(() => {
+    setConnecting(false);
+    setPairingAgent("");
+    setLoadError(null);
+    setWorkspaceView("agents");
+    autoLoadedOwner.current = null;
     setSkills([]);
     setSkillId("");
     setAgent("");
@@ -213,6 +247,20 @@ function AgentWalletPage() {
     setPrepared(null);
     setQuotePreview(null);
   }, [account?.address]);
+
+  useEffect(() => {
+    const session = loadSession();
+    if (
+      !ownerAddress ||
+      busy ||
+      autoLoadedOwner.current === ownerAddress ||
+      session?.address !== ownerAddress ||
+      session.expiresAtMs <= Date.now() + 30_000
+    )
+      return;
+    autoLoadedOwner.current = ownerAddress;
+    void loadSkills(session.accessToken);
+  }, [ownerAddress, busy, loadSkills]);
 
   async function chooseSelectedAction() {
     if (!account || !skillId || busy) return;
@@ -502,6 +550,7 @@ function AgentWalletPage() {
       setPrepared(null);
       setActivationWalletId(null);
       setCreating(false);
+      setWorkspaceView("budgets");
       setLastApproval({
         owner: account.address,
         actionName: prepared.grant.actionName,
@@ -610,6 +659,22 @@ function AgentWalletPage() {
       hasActionOptions: actionOptions !== null,
       budgetIsValid: budgetError === null,
     });
+  const connectedAgents = pairedForOwner(pairedAgents, ownerAddress ?? "", SUI_NETWORK);
+  const recordPairing = (record: PairedAgent) => {
+    if (record.owner !== currentOwner.current || record.network !== SUI_NETWORK) return;
+    setPairedAgents((records) => [
+      record,
+      ...records.filter((old) => old.agent !== record.agent || old.network !== record.network),
+    ]);
+  };
+  const pairingSession = async () => {
+    if (!account) throw new Error("Connect your owner wallet first.");
+    const session = await ensureSession(account.address, async (message) => {
+      const { signature } = await signPersonalMessage({ message });
+      return signature;
+    });
+    return session.accessToken;
+  };
   const beginSetup = () => {
     if (busy || pending || prepared || waitingWallet) return;
     setLastApproval(null);
@@ -663,31 +728,39 @@ function AgentWalletPage() {
   }, [requestedAction, busy, pending, prepared, waitingWallet, hasLoaded, skills, skillId]);
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-background">
       <SiteHeader />
-      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
-        <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+      <main className="mx-auto max-w-5xl px-5 py-7 sm:px-8 sm:py-9">
+        <div className="mb-7 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-primary">
-              Agent workspace
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
-              Agents & budgets
-            </h1>
-            <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
-              Give an agent a budget for one action. You keep your wallet and control when access
-              stops.
+            <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              Manage agent signers and their spending permissions.
             </p>
           </div>
           {account && (
-            <Button
-              variant="outline"
-              onClick={beginSetup}
-              disabled={Boolean(busy || pending || prepared || waitingWallet)}
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add a budget
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {committed ? (
+                <Button variant="outline" onClick={() => setCreating(true)}>
+                  Resume budget setup
+                </Button>
+              ) : (
+                <Button variant="outline" onClick={beginSetup} disabled={Boolean(busy)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  New budget
+                </Button>
+              )}
+              <Button
+                onClick={() => {
+                  setPairingAgent("");
+                  setConnecting(true);
+                }}
+                disabled={Boolean(busy)}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Connect agent
+              </Button>
+            </div>
           )}
         </div>
 
@@ -706,6 +779,186 @@ function AgentWalletPage() {
           </section>
         ) : (
           <>
+            <div
+              role="tablist"
+              aria-label="Agent workspace"
+              className="mb-6 flex gap-6 border-b border-border"
+            >
+              {(["agents", "budgets", "workflows"] as const).map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  role="tab"
+                  id={`workspace-tab-${view}`}
+                  aria-controls={`workspace-panel-${view}`}
+                  tabIndex={workspaceView === view ? 0 : -1}
+                  onKeyDown={(event) => {
+                    const views = ["agents", "budgets", "workflows"] as const;
+                    const index = views.indexOf(view);
+                    const next =
+                      event.key === "ArrowRight"
+                        ? (index + 1) % views.length
+                        : event.key === "ArrowLeft"
+                          ? (index + views.length - 1) % views.length
+                          : event.key === "Home"
+                            ? 0
+                            : event.key === "End"
+                              ? views.length - 1
+                              : -1;
+                    if (next < 0) return;
+                    event.preventDefault();
+                    setWorkspaceView(views[next]);
+                    event.currentTarget.parentElement
+                      ?.querySelector<HTMLButtonElement>(`#workspace-tab-${views[next]}`)
+                      ?.focus();
+                  }}
+                  aria-selected={workspaceView === view}
+                  onClick={() => setWorkspaceView(view)}
+                  className={`border-b-2 px-1 pb-3 text-sm font-medium capitalize transition-colors ${workspaceView === view ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                >
+                  {view}
+                  {view === "budgets" && wallets.length > 0 && (
+                    <span className="ml-2 text-xs text-muted-foreground">{wallets.length}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+            {!hasLoaded && (
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium">Sign in to Rill</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Your wallet is connected. Sign in to load agents and actions.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={Boolean(busy)}
+                  onClick={() => void loadSkills()}
+                >
+                  {busy ?? "Sign in"}
+                </Button>
+              </div>
+            )}
+            {loadError && (
+              <div
+                role="alert"
+                className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-destructive/20 px-4 py-3 text-sm"
+              >
+                <span>{loadError}</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={Boolean(busy)}
+                  onClick={() => void loadSkills()}
+                >
+                  Try again
+                </Button>
+              </div>
+            )}
+            {workspaceView === "agents" && (
+              <section
+                role="tabpanel"
+                id="workspace-panel-agents"
+                aria-labelledby="workspace-tab-agents"
+              >
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold">Connected signers</h2>
+                  {hasLoaded && (
+                    <button
+                      type="button"
+                      disabled={Boolean(busy)}
+                      onClick={() => void loadSkills()}
+                      className="text-xs text-muted-foreground hover:text-primary"
+                    >
+                      Refresh
+                    </button>
+                  )}
+                </div>
+                {connectedAgents.length === 0 ? (
+                  <div className="flex items-start gap-4 rounded-lg border border-dashed border-border px-5 py-7">
+                    <Bot className="mt-0.5 h-5 w-5 text-muted-foreground" />
+                    <div>
+                      <h3 className="text-sm font-medium">
+                        {loadError
+                          ? "Agent list unavailable"
+                          : hasLoaded
+                            ? "No agent connected"
+                            : "Your connected agents"}
+                      </h3>
+                      <p className="mt-1 max-w-lg text-sm leading-relaxed text-muted-foreground">
+                        {hasLoaded
+                          ? "Connect the signer your agent uses, then assign an action budget."
+                          : "Sign in to view your existing signers, or connect another agent."}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-border rounded-lg border border-border bg-card">
+                    {connectedAgents.map((record) => (
+                      <div
+                        key={record.agent}
+                        className="flex flex-wrap items-center justify-between gap-4 px-5 py-4"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                            <Bot className="h-4 w-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="font-mono text-sm">{shortAddress(record.agent)}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Connected · {SUI_NETWORK}
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={Boolean(busy || committed)}
+                          onClick={() => {
+                            setAgent(record.agent);
+                            beginSetup();
+                          }}
+                        >
+                          Assign budget
+                          <ArrowRight className="ml-2 h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+            <Dialog open={connecting} onOpenChange={setConnecting}>
+              <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto rounded-xl sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Connect an agent</DialogTitle>
+                  <DialogDescription>
+                    Pair its public signer address with your wallet. Spending access is approved
+                    separately.
+                  </DialogDescription>
+                </DialogHeader>
+                <SignerPairing
+                  key={account.address}
+                  owner={account.address}
+                  initialAgents={pairedAgents}
+                  agent={pairingAgent}
+                  onSelect={setPairingAgent}
+                  session={pairingSession}
+                  connectOnly
+                  onConnected={(record) => {
+                    if (record.owner !== currentOwner.current || record.network !== SUI_NETWORK)
+                      return;
+                    recordPairing(record);
+                    setAgent(record.agent);
+                    setConnecting(false);
+                    setWorkspaceView("agents");
+                    void loadSkills();
+                  }}
+                />
+              </DialogContent>
+            </Dialog>
             {lastApproval?.owner === account.address && (
               <section className="mb-8 flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-5">
                 <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
@@ -719,17 +972,19 @@ function AgentWalletPage() {
                 </div>
               </section>
             )}
-            {(creating || pending || prepared) && (
-              <>
+            <Dialog open={creating} onOpenChange={setCreating}>
+              <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] max-w-4xl overflow-y-auto rounded-xl sm:max-w-4xl">
+                <DialogHeader>
+                  <DialogTitle>{committed ? "Complete budget approval" : "New budget"}</DialogTitle>
+                  <DialogDescription>
+                    Choose an action, assign an agent, and approve its spending limits.
+                  </DialogDescription>
+                </DialogHeader>
                 {!hasLoaded && !committed ? (
-                  <section className="max-w-2xl rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-8">
-                    <p className="text-xs font-medium uppercase tracking-widest text-primary">
-                      New budget
-                    </p>
-                    <h2 className="mt-3 text-2xl font-semibold">Choose what your agent can do</h2>
+                  <section className="py-3">
+                    <h2 className="text-lg font-semibold">Sign in to choose an action</h2>
                     <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                      Continue with your connected wallet to see your published actions and
-                      connected agents. Signing in does not move funds.
+                      Sign a login message to load your published actions and agent signers.
                     </p>
                     <div className="mt-6">
                       <SetupNext onClick={() => void loadSkills()} disabled={Boolean(busy)}>
@@ -1155,18 +1410,60 @@ function AgentWalletPage() {
                     )}
                   </SetupJourney>
                 )}
-              </>
+              </DialogContent>
+            </Dialog>
+
+            {workspaceView === "workflows" && (
+              <div
+                role="tabpanel"
+                id="workspace-panel-workflows"
+                aria-labelledby="workspace-tab-workflows"
+              >
+                <WorkflowExport
+                  key={account.address}
+                  wallets={wallets}
+                  owner={account.address}
+                  skills={skills}
+                />
+              </div>
             )}
 
-            <WorkflowExport
-              key={account.address}
-              wallets={wallets}
-              owner={account.address}
-              skills={skills}
-            />
-
-            {wallets.length > 0 && (
-              <section className="mt-10 space-y-4">
+            {workspaceView === "budgets" && wallets.length === 0 && (
+              <section
+                role="tabpanel"
+                id="workspace-panel-budgets"
+                aria-labelledby="workspace-tab-budgets"
+                className="rounded-lg border border-dashed border-border px-5 py-7"
+              >
+                <h2 className="text-sm font-medium">No budgets yet</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Publish an action in the builder, then give your agent a spending limit.
+                </p>
+                <div className="mt-4 flex items-center gap-5">
+                  <button
+                    type="button"
+                    onClick={beginSetup}
+                    disabled={Boolean(busy || committed)}
+                    className="text-sm font-medium text-primary"
+                  >
+                    New budget
+                  </button>
+                  <Link
+                    to="/builder"
+                    className="text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    Open builder
+                  </Link>
+                </div>
+              </section>
+            )}
+            {workspaceView === "budgets" && wallets.length > 0 && (
+              <section
+                role="tabpanel"
+                id="workspace-panel-budgets"
+                aria-labelledby="workspace-tab-budgets"
+                className="space-y-4"
+              >
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="h-4 w-4 text-primary" />
                   <h2 className="text-lg font-semibold">Your saved budgets</h2>
@@ -1175,7 +1472,7 @@ function AgentWalletPage() {
                   {wallets.map((granted) => (
                     <article
                       key={granted.walletId}
-                      className="min-w-0 rounded-2xl border border-border bg-card p-5 shadow-sm"
+                      className="min-w-0 rounded-lg border border-border bg-card p-5"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3">

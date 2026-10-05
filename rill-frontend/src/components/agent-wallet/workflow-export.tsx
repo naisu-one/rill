@@ -68,7 +68,7 @@ export function WorkflowExport({
     }
   }
   return (
-    <section className="mt-10 border-t border-border pt-8" aria-label="Agent workflow">
+    <section className="pt-1" aria-label="Agent workflow">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
           <h2 className="text-lg font-semibold">Run actions in sequence</h2>
@@ -89,7 +89,7 @@ export function WorkflowExport({
       </div>
       {wallets.length === 0 ? (
         <p className="mt-5 text-sm text-muted-foreground">
-          Approve budgets above to add actions here.
+          Create and approve budgets in the Budgets tab to add actions here.
         </p>
       ) : (
         <div className="mt-5 flex flex-wrap gap-2">
